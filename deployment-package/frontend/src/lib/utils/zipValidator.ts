@@ -1,0 +1,267 @@
+/**
+ * ZIP file validation utility
+ * Validates ZIP files contain valid images (.jpg or .tif) before upload
+ * Also validates filename format, sheet numbers, and georeferencing files
+ */
+
+export type ValidationResult = {
+	valid: boolean;
+	fileName: string;
+	error?: string;
+	warnings?: string[];
+	imagesFound?: string[];
+	imageTypes?: ('jpg' | 'tif')[];
+	allFilesFound?: string[];
+	seamId?: string;
+	sheetNumber?: string;
+	worldFilesFound?: string[];
+	missingWorldFiles?: string[];
+};
+
+/**
+ * Parse filename to extract SeamID and SheetNumber
+ * Expected formats:
+ * - SeamID_XXXXXX.zip (e.g., D723_433857.zip)
+ * - SeamID_XX_XXXX.zip (e.g., D723_43_3857.zip)
+ * Sheet number must be exactly 6 digits (with or without separator)
+ */
+function parseMapFilename(filename: string): { seamId: string; sheetNumber: string } | null {
+	// Remove extension
+	const nameWithoutExt = filename.replace(/\.(zip|jpg|jpeg|tif|tiff)$/i, '');
+
+	if (!nameWithoutExt.includes('_')) {
+		return null;
+	}
+
+	// Get seam ID (everything before first underscore) - no restrictions on format/length
+	const seamId = nameWithoutExt.split('_')[0].toUpperCase();
+
+	// Find 6-digit sheet number with optional separators (underscore, hyphen, or space)
+	// Supports formats: XXXXXX, XX_XXXX, XX-XXXX, XX XXXX
+	// Try to match either 6 consecutive digits OR 2 digits + separator + 4 digits
+	const match = nameWithoutExt.match(/(?<!\d)(\d{6}|\d{2}[-\s_]\d{4})(?=\D|$)/);
+	if (!match) {
+		return null;
+	}
+
+	// Extract just the digits
+	const sheetNumber = match[0].replace(/\D/g, '');
+
+	if (sheetNumber.length !== 6) {
+		return null;
+	}
+
+	return { seamId, sheetNumber };
+}
+
+/**
+ * Check if a filename is a valid image file
+ */
+function isValidImage(filename: string): { valid: boolean; type?: 'jpg' | 'tif' } {
+	const lower = filename.toLowerCase();
+
+	if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+		return { valid: true, type: 'jpg' };
+	}
+
+	if (lower.endsWith('.tif') || lower.endsWith('.tiff')) {
+		return { valid: true, type: 'tif' };
+	}
+
+	return { valid: false };
+}
+
+/**
+ * Check if a filename is a world file for georeferencing
+ * Common extensions: .jgw, .jgwx, .tfw, .tifw, .tiffw, .pgw, .pngw
+ */
+function isWorldFile(filename: string): boolean {
+	const lower = filename.toLowerCase();
+	const worldExtensions = ['.jgw', '.jgwx', '.tfw', '.tifw', '.tiffw', '.pgw', '.pngw'];
+	return worldExtensions.some(ext => lower.endsWith(ext));
+}
+
+/**
+ * Get expected world file names for an image
+ */
+function getExpectedWorldFiles(imageName: string): string[] {
+	const baseName = imageName.replace(/\.(jpg|jpeg|tif|tiff)$/i, '');
+	const lower = imageName.toLowerCase();
+
+	if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+		return [`${baseName}.jgw`, `${baseName}.jgwx`];
+	}
+
+	if (lower.endsWith('.tif') || lower.endsWith('.tiff')) {
+		return [`${baseName}.tfw`, `${baseName}.tifw`, `${baseName}.tiffw`];
+	}
+
+	if (lower.endsWith('.png')) {
+		return [`${baseName}.pgw`, `${baseName}.pngw`];
+	}
+
+	return [];
+}
+
+/**
+ * Validate a single ZIP file
+ * Returns validation result with error message if invalid
+ */
+export async function validateZipFile(file: File): Promise<ValidationResult> {
+	const result: ValidationResult = {
+		valid: false,
+		fileName: file.name,
+		warnings: []
+	};
+
+	// Check file type
+	if (!file.name.toLowerCase().endsWith('.zip')) {
+		result.error = 'File must be a ZIP archive';
+		return result;
+	}
+
+	// Validate ZIP filename format (SeamID_SheetNumber.zip)
+	const zipFilenameInfo = parseMapFilename(file.name);
+	if (!zipFilenameInfo) {
+		result.error = 'Invalid ZIP filename format. File name must follow the pattern: SeamID_SheetNumber.zip where SeamID can be any alphanumeric value and SheetNumber is exactly 6 digits (e.g., 16287_453465.zip or D723_43_3857.zip)';
+		return result;
+	}
+
+	result.seamId = zipFilenameInfo.seamId;
+	result.sheetNumber = zipFilenameInfo.sheetNumber;
+
+	try {
+		// Use JSZip to read the archive
+		const JSZip = (await import('jszip')).default;
+		const zip = await JSZip.loadAsync(file);
+
+		// Find all files, images, and world files
+		const allFiles: string[] = [];
+		const validImages: { name: string; type: 'jpg' | 'tif' }[] = [];
+		const worldFiles: string[] = [];
+
+		zip.forEach((relativePath, zipEntry) => {
+			// Skip directories
+			if (zipEntry.dir) return;
+
+			const fileName = relativePath.split('/').pop() || relativePath;
+
+			// Skip macOS metadata files (starting with ._ or .)
+			if (fileName.startsWith('._') || fileName.startsWith('.')) {
+				return;
+			}
+
+			// Track all files (excluding hidden/metadata files)
+			allFiles.push(relativePath);
+
+			const imageCheck = isValidImage(fileName);
+
+			if (imageCheck.valid && imageCheck.type) {
+				validImages.push({
+					name: relativePath,
+					type: imageCheck.type
+				});
+			}
+
+			// Track world files
+			if (isWorldFile(fileName)) {
+				worldFiles.push(relativePath);
+			}
+		});
+
+		// Validation: must contain at least one valid image
+		if (validImages.length === 0) {
+			result.error = 'ZIP must contain at least one .jpg or .tif image';
+			return result;
+		}
+
+		// Validation: Check world file requirements based on image type
+		const missingWorldFiles: string[] = [];
+		result.worldFilesFound = worldFiles;
+
+		for (const image of validImages) {
+			const imageFileName = image.name.split('/').pop() || image.name;
+			const expectedWorldFiles = getExpectedWorldFiles(imageFileName);
+
+			// Check if at least one expected world file exists
+			const hasWorldFile = expectedWorldFiles.some(expectedWorld => {
+				return worldFiles.some(worldFile => {
+					const worldFileName = worldFile.split('/').pop() || worldFile;
+					return worldFileName.toLowerCase() === expectedWorld.toLowerCase();
+				});
+			});
+
+			// World files are REQUIRED for JPEG/JPG, OPTIONAL for TIFF
+			if (!hasWorldFile && image.type === 'jpg') {
+				missingWorldFiles.push(imageFileName);
+			}
+		}
+
+		if (missingWorldFiles.length > 0) {
+			result.error = `Missing required world files for JPEG images: ${missingWorldFiles.join(', ')}. Each JPEG/JPG image must have a corresponding .jgw or .jgwx world file for georeferencing.`;
+			result.missingWorldFiles = missingWorldFiles;
+			return result;
+		}
+
+		// Validation: Validate image filenames contain sheet number
+		for (const image of validImages) {
+			const imageFileName = image.name.split('/').pop() || image.name;
+			const imageFileInfo = parseMapFilename(imageFileName);
+
+			if (!imageFileInfo) {
+				result.error = `Invalid image filename: ${imageFileName}. File name must follow the pattern: SeamID_SheetNumber.ext where SheetNumber is exactly 6 digits (e.g., 16287_453465.jpg)`;
+				return result;
+			}
+
+			// Check if sheet number matches ZIP sheet number
+			if (imageFileInfo.sheetNumber !== zipFilenameInfo.sheetNumber) {
+				result.error = `Sheet number mismatch: Image file ${imageFileName} has sheet number ${imageFileInfo.sheetNumber} but ZIP file has ${zipFilenameInfo.sheetNumber}. All files must have matching sheet numbers.`;
+				return result;
+			}
+		}
+
+		// Success - all validations passed
+		result.valid = true;
+		result.imagesFound = validImages.map(img => img.name);
+		result.imageTypes = validImages.map(img => img.type);
+		result.allFilesFound = allFiles;
+
+		return result;
+
+	} catch (error) {
+		result.error = `Failed to read ZIP file: ${error instanceof Error ? error.message : 'Unknown error'}`;
+		return result;
+	}
+}
+
+/**
+ * Validate multiple ZIP files
+ * Returns array of validation results
+ */
+export async function validateZipFiles(files: File[]): Promise<ValidationResult[]> {
+	return Promise.all(files.map(file => validateZipFile(file)));
+}
+
+/**
+ * Check if all validation results are valid
+ */
+export function allValid(results: ValidationResult[]): boolean {
+	return results.every(r => r.valid);
+}
+
+/**
+ * Get summary of validation results
+ */
+export function getValidationSummary(results: ValidationResult[]): {
+	total: number;
+	valid: number;
+	invalid: number;
+	errors: string[];
+} {
+	return {
+		total: results.length,
+		valid: results.filter(r => r.valid).length,
+		invalid: results.filter(r => !r.valid).length,
+		errors: results.filter(r => !r.valid).map(r => `${r.fileName}: ${r.error}`).slice(0, 5)
+	};
+}

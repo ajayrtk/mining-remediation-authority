@@ -1,0 +1,65 @@
+# Example Terraform Variables Configuration
+# Copy this file to terraform.tfvars and modify as needed
+
+# ===== Basic Configuration =====
+aws_region   = "eu-west-2"
+project_name = "mra-mines"
+environment  = "dev"
+
+# ===== S3 Bucket Names =====
+map_input_bucket_name  = "map-input"
+map_output_bucket_name = "map-output"
+
+# ===== DynamoDB Table Names =====
+maps_table_name     = "maps"
+map_jobs_table_name = "maps-job"
+
+# ===== SES Configuration =====
+ses_sender_email = "no-reply@example.com"
+
+# ===== Cognito Configuration =====
+# cognito_domain_prefix = "my-custom-prefix"  # Optional custom prefix
+
+cognito_callback_urls = [
+  "http://localhost:5173/auth/callback",
+  "https://your-domain.com/auth/callback"
+]
+
+cognito_logout_urls = [
+  "http://localhost:5173/",
+  "https://your-domain.com/"
+]
+
+# ===== IAM Role Configuration =====
+# Set to true to use existing IAM roles instead of creating new ones
+use_existing_iam_roles = false
+
+# When use_existing_iam_roles = true, specify the names of existing roles
+# Leave as null or omit roles you want to create
+existing_iam_role_names = {
+  input_handler           = null  # "existing-input-handler-role"
+  mock_ecs               = null  # "existing-mock-ecs-role"
+  output_handler         = null  # "existing-output-handler-role"
+  s3_copy_processor      = null  # "existing-s3-copy-processor-role"
+  ecs_task_execution     = null  # "existing-ecs-task-execution-role"
+  ecs_task               = null  # "existing-ecs-task-role"
+  frontend_task_execution = null  # "existing-frontend-task-execution-role"
+  frontend_task          = null  # "existing-frontend-task-role"
+  pre_auth_trigger       = null  # "existing-pre-auth-trigger-role"
+}
+
+# ===== Example: Using Existing IAM Roles =====
+# Uncomment and modify the following to use existing IAM roles:
+
+# use_existing_iam_roles = true
+# existing_iam_role_names = {
+#   input_handler           = "mra-mines-input-handler"
+#   mock_ecs               = "mra-mines-mock-ecs"
+#   output_handler         = "mra-mines-output-handler"
+#   s3_copy_processor      = "mra-mines-s3-copy-processor"
+#   ecs_task_execution     = "mra-mines-ecs-task-execution"
+#   ecs_task               = "mra-mines-ecs-task"
+#   frontend_task_execution = "mra-mines-dev-frontend-task-execution"
+#   frontend_task          = "mra-mines-dev-frontend-task"
+#   pre_auth_trigger       = "mra-mines-pre-auth-trigger-role"
+# }
