@@ -12,7 +12,10 @@ const config = {
 		adapter: adapter({
 			out: 'build',
 			precompress: false,
-			envPrefix: ''
+			envPrefix: '',
+			// Trust proxy headers from CloudFront/ALB (X-Forwarded-Proto, X-Forwarded-Host)
+			// This ensures url.origin uses the CloudFront URL for Cognito redirects
+			xff_depth: 2
 		})
 	}
 };

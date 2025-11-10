@@ -81,6 +81,12 @@ variable "cognito_logout_urls" {
 	]
 }
 
+variable "frontend_origin_domain" {
+	type        = string
+	description = "CloudFront origin domain (ECS task public DNS)"
+	default     = ""
+}
+
 variable "use_existing_iam_roles" {
 	type        = bool
 	description = "If true, use existing IAM roles instead of creating new ones"
@@ -111,4 +117,23 @@ variable "existing_iam_role_names" {
 		frontend_task          = null
 		pre_auth_trigger       = null
 	}
+}
+
+variable "admin_email" {
+	type        = string
+	description = "Email address for the default admin user (used by deploy script)"
+	default     = "admin@example.com"
+}
+
+variable "admin_username" {
+	type        = string
+	description = "Username for the default admin user (used by deploy script)"
+	default     = "admin"
+}
+
+variable "admin_password" {
+	type        = string
+	description = "Password for the default admin user (used by deploy script, change after first login!)"
+	sensitive   = true
+	default     = "ChangeMe123!"
 }

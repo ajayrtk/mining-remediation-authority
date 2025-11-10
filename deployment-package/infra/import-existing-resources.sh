@@ -7,7 +7,16 @@ echo "  Importing Existing AWS Resources"
 echo "=========================================="
 echo ""
 
-REGION="eu-west-1"
+# Read configuration from terraform.tfvars
+PROJECT_NAME=$(grep -E '^\s*project_name\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/')
+ENVIRONMENT=$(grep -E '^\s*environment\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/')
+REGION=$(grep -E '^\s*aws_region\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/')
+
+echo "Configuration:"
+echo "  Project: $PROJECT_NAME"
+echo "  Environment: $ENVIRONMENT"
+echo "  Region: $REGION"
+echo ""
 
 # Colors
 GREEN='\033[0;32m'
@@ -44,25 +53,28 @@ import_resource() {
 }
 
 echo "1. Importing ECR Repositories..."
-import_resource "aws_ecr_repository.processor" "mra-mines-processor" "ECR processor repository"
-import_resource "aws_ecr_repository.frontend" "mra-mines-dev-frontend" "ECR frontend repository"
+import_resource "aws_ecr_repository.processor" "${PROJECT_NAME}-processor" "ECR processor repository"
+import_resource "aws_ecr_repository.frontend" "${PROJECT_NAME}-${ENVIRONMENT}-frontend" "ECR frontend repository"
 echo ""
 
 echo "2. Importing S3 Buckets..."
-import_resource "aws_s3_bucket.map_input" "mra-mines-dev-mra-map-input" "S3 input bucket"
-import_resource "aws_s3_bucket.map_outputs" "mra-mines-dev-mra-map-output" "S3 output bucket"
+INPUT_BUCKET_NAME=$(grep -E '^\s*map_input_bucket_name\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/')
+OUTPUT_BUCKET_NAME=$(grep -E '^\s*map_output_bucket_name\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/')
+import_resource "aws_s3_bucket.map_input" "${PROJECT_NAME}-${ENVIRONMENT}-${INPUT_BUCKET_NAME}" "S3 input bucket"
+import_resource "aws_s3_bucket.map_outputs" "${PROJECT_NAME}-${ENVIRONMENT}-${OUTPUT_BUCKET_NAME}" "S3 output bucket"
 echo ""
 
 echo "3. Importing DynamoDB Tables..."
-import_resource "aws_dynamodb_table.map_jobs" "mra-mines-dev-maps-job" "DynamoDB jobs table"
-import_resource "aws_dynamodb_table.maps" "mra-mines-dev-maps" "DynamoDB maps table"
+import_resource "aws_dynamodb_table.map_jobs" "${PROJECT_NAME}-${ENVIRONMENT}-maps-job" "DynamoDB jobs table"
+import_resource "aws_dynamodb_table.maps" "${PROJECT_NAME}-${ENVIRONMENT}-maps" "DynamoDB maps table"
 echo ""
 
 echo "4. Importing ECS Resources..."
-import_resource "aws_ecs_cluster.main" "mra-mines-cluster" "ECS cluster"
+CLUSTER_NAME="${PROJECT_NAME}-cluster"
+import_resource "aws_ecs_cluster.main" "$CLUSTER_NAME" "ECS cluster"
 
 # Get ECS service ARN if exists
-SERVICE_ARN=$(aws ecs list-services --cluster mra-mines-cluster --region $REGION --query 'serviceArns[?contains(@, `frontend`)]' --output text 2>/dev/null | head -1)
+SERVICE_ARN=$(aws ecs list-services --cluster $CLUSTER_NAME --region $REGION --query 'serviceArns[?contains(@, `frontend`)]' --output text 2>/dev/null | head -1)
 if [ -n "$SERVICE_ARN" ]; then
     import_resource "aws_ecs_service.frontend" "$SERVICE_ARN" "ECS frontend service"
 fi
@@ -70,7 +82,8 @@ echo ""
 
 echo "5. Importing Cognito Resources..."
 # Get Cognito User Pool ID
-POOL_ID=$(aws cognito-idp list-user-pools --max-results 10 --region $REGION --query "UserPools[?Name=='mra-mines-dev-users'].Id" --output text 2>/dev/null)
+COGNITO_POOL_NAME="${PROJECT_NAME}-${ENVIRONMENT}-users"
+POOL_ID=$(aws cognito-idp list-user-pools --max-results 10 --region $REGION --query "UserPools[?Name=='$COGNITO_POOL_NAME'].Id" --output text 2>/dev/null)
 if [ -n "$POOL_ID" ]; then
     import_resource "aws_cognito_user_pool.users" "$POOL_ID" "Cognito user pool"
 
@@ -108,7 +121,8 @@ fi
 echo ""
 
 echo "7. Importing CloudFront Distribution..."
-DIST_ID=$(aws cloudfront list-distributions --region us-east-1 --query "DistributionList.Items[?Comment=='mra-mines-dev-frontend'].Id" --output text 2>/dev/null | head -1)
+CLOUDFRONT_COMMENT="${PROJECT_NAME}-${ENVIRONMENT}-frontend"
+DIST_ID=$(aws cloudfront list-distributions --region us-east-1 --query "DistributionList.Items[?Comment=='$CLOUDFRONT_COMMENT'].Id" --output text 2>/dev/null | head -1)
 if [ -n "$DIST_ID" ] && [ "$DIST_ID" != "None" ]; then
     import_resource "aws_cloudfront_distribution.frontend" "$DIST_ID" "CloudFront distribution"
 fi

@@ -139,15 +139,13 @@ export const exchangeCodeForTokens = async (
 
 export const refreshTokens = async (
 	refreshToken: string,
-	fetchFn: typeof fetch,
-	redirectUri: string
+	fetchFn: typeof fetch
 ): Promise<TokenResponse> => {
 	const config = ensureConfig();
 	const body = new URLSearchParams({
 		grant_type: 'refresh_token',
 		client_id: config.clientId,
-		refresh_token: refreshToken,
-		redirect_uri: redirectUri
+		refresh_token: refreshToken
 	});
 
 	const response = await fetchFn(`${getIssuer()}/oauth2/token`, {

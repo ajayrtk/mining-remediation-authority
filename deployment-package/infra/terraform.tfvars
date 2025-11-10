@@ -8,12 +8,12 @@ aws_region   = "eu-central-1"    # AWS region for deployment
 
 # ===== S3 BUCKET NAMES =====
 # Use unique names to avoid conflicts with existing buckets
-map_input_bucket_name  = "mra-map-input"
-map_output_bucket_name = "mra-map-output"
+map_input_bucket_name  = "map-input"
+map_output_bucket_name = "map-output"
 
 # ===== IAM ROLES CONFIGURATION =====
 # Use existing IAM roles instead of creating new ones
-use_existing_iam_roles = true
+use_existing_iam_roles = false
 
 # Names of existing IAM roles in AWS account (only used if use_existing_iam_roles = true)
 existing_iam_role_names = {
@@ -28,14 +28,8 @@ existing_iam_role_names = {
   pre_auth_trigger       = "mra-mines-pre-auth-trigger-role"
 }
 
-# ===== COGNITO CONFIGURATION =====
-# Update these URLs after deployment with your CloudFront URL
-cognito_callback_urls = [
-  "http://localhost:5173/auth/callback",
-  "https://dli8nj0dqq4yj.cloudfront.net/auth/callback"
-]
-
-cognito_logout_urls = [
-  "http://localhost:5173/",
-  "https://dli8nj0dqq4yj.cloudfront.net/"
-]
+# ===== ADMIN USER CONFIGURATION =====
+# Default admin user credentials (change after first login!)
+admin_email    = "ajay.rawat@stfc.ac.uk"
+admin_username = "ajay"
+admin_password = "Ajay@1234"

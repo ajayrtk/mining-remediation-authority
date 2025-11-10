@@ -15,13 +15,13 @@ echo -e "${GREEN}=== Frontend Docker Build and Push ===${NC}"
 # Get AWS account ID and region
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-# Get region from Terraform or use environment variable
+# Get region from Terraform output (with fallback to AWS CLI default)
 cd ../infra
-AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || terraform output -raw aws_region 2>&1 | grep -v "Error" || echo "${AWS_REGION:-eu-west-1}")
-
-# If we still don't have a region, try to get it from terraform state
-if [ "$AWS_REGION" = "eu-west-2" ] || [ -z "$AWS_REGION" ]; then
-    AWS_REGION=$(grep -r "aws_region" terraform.tfvars 2>/dev/null | cut -d'"' -f2 || echo "eu-west-1")
+TERRAFORM_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "")
+if [ -z "$TERRAFORM_REGION" ]; then
+    AWS_REGION=${AWS_REGION:-$(aws configure get region)}
+else
+    AWS_REGION=$TERRAFORM_REGION
 fi
 
 echo -e "${YELLOW}Using AWS Region: ${AWS_REGION}${NC}"
@@ -60,8 +60,24 @@ echo -e "${GREEN}Image: ${ECR_REPO}:latest${NC}"
 # Update ECS service to use new image
 echo -e "${YELLOW}Updating ECS service...${NC}"
 cd ../infra
-SERVICE_NAME=$(terraform output -raw frontend_service_name 2>/dev/null || echo "mra-mines-dev-frontend")
-CLUSTER_NAME=$(terraform output -raw ecs_cluster_name 2>/dev/null || echo "mra-mines-dev-cluster")
+
+# Get service and cluster names from Terraform output
+SERVICE_NAME=$(terraform output -raw frontend_service_name 2>/dev/null || echo "")
+CLUSTER_NAME=$(terraform output -raw ecs_cluster_name 2>/dev/null || echo "")
+
+# If Terraform outputs are empty, read from terraform.tfvars
+if [ -z "$SERVICE_NAME" ] || [ -z "$CLUSTER_NAME" ]; then
+    echo -e "${YELLOW}Reading configuration from terraform.tfvars...${NC}"
+    PROJECT_NAME=$(grep -E '^\s*project_name\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/')
+    ENVIRONMENT=$(grep -E '^\s*environment\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/')
+
+    if [ -z "$SERVICE_NAME" ]; then
+        SERVICE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-frontend"
+    fi
+    if [ -z "$CLUSTER_NAME" ]; then
+        CLUSTER_NAME="${PROJECT_NAME}-cluster"
+    fi
+fi
 
 echo -e "${GREEN}Forcing new deployment of ECS service...${NC}"
 aws ecs update-service --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --force-new-deployment --region ${AWS_REGION} > /dev/null

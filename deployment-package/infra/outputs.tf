@@ -48,6 +48,7 @@ MAPS_TABLE=${aws_dynamodb_table.maps.name}
 COGNITO_REGION=${local.cognito_region}
 COGNITO_USER_POOL_ID=${aws_cognito_user_pool.main.id}
 COGNITO_CLIENT_ID=${aws_cognito_user_pool_client.web.id}
+COGNITO_IDENTITY_POOL_ID=${aws_cognito_identity_pool.main.id}
 COGNITO_DOMAIN=${aws_cognito_user_pool_domain.main.domain}.auth.${local.cognito_region}.amazoncognito.com
 SES_SENDER_EMAIL=${var.ses_sender_email}
 EOT

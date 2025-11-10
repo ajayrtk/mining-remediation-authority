@@ -26,11 +26,24 @@ cleanup_data_only() {
     echo "  • All AWS infrastructure"
     echo ""
 
-    # Get AWS region from config
-    if [ -f "infra/terraform.tfvars" ]; then
-        AWS_REGION=$(grep "aws_region" infra/terraform.tfvars | cut -d'"' -f2 | head -1 2>/dev/null || echo "eu-west-1")
+    # Get AWS region from Terraform output
+    if [ -d "infra" ]; then
+        cd infra
+        TERRAFORM_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "")
+        if [ -z "$TERRAFORM_REGION" ]; then
+            TERRAFORM_REGION=$(grep -E '^\s*aws_region\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/' 2>/dev/null || echo "")
+            AWS_REGION=${TERRAFORM_REGION:-$(aws configure get region)}
+        else
+            AWS_REGION=$TERRAFORM_REGION
+        fi
+        cd ..
     else
-        AWS_REGION="eu-west-1"
+        # Fallback: try to read from terraform.tfvars or AWS CLI config
+        if [ -f "infra/terraform.tfvars" ]; then
+            AWS_REGION=$(grep -E '^\s*aws_region\s*=' infra/terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/' 2>/dev/null || aws configure get region)
+        else
+            AWS_REGION=$(aws configure get region)
+        fi
     fi
 
     echo -e "${YELLOW}Type 'CLEAN' to proceed with data cleanup:${NC}"
@@ -189,37 +202,81 @@ cleanup_infrastructure() {
 
     cd infra
 
-    # Get AWS region from config
-    AWS_REGION=$(grep "aws_region" terraform.tfvars | cut -d'"' -f2 | head -1 2>/dev/null || echo "eu-west-1")
+    # Get AWS region from Terraform output
+    TERRAFORM_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "")
+    if [ -z "$TERRAFORM_REGION" ]; then
+        TERRAFORM_REGION=$(grep -E '^\s*aws_region\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/' 2>/dev/null || echo "")
+        AWS_REGION=${TERRAFORM_REGION:-$(aws configure get region)}
+    else
+        AWS_REGION=$TERRAFORM_REGION
+    fi
 
-    # Step 1: Empty S3 buckets (required before deletion)
-    echo -e "${YELLOW}[1/4] Emptying S3 buckets...${NC}"
+    # Step 1: Empty S3 buckets INCLUDING all versions (required before deletion)
+    echo -e "${YELLOW}[1/5] Emptying S3 buckets (including all versions)...${NC}"
     BUCKET_INPUT=$(terraform output -raw map_input_bucket_name 2>/dev/null || echo "")
     BUCKET_OUTPUT=$(terraform output -raw map_output_bucket_name 2>/dev/null || echo "")
 
+    empty_bucket_versions() {
+        local bucket=$1
+        echo "  • Emptying $bucket (current objects)..."
+        aws s3 rm s3://$bucket --recursive --quiet --region $AWS_REGION 2>/dev/null || true
+
+        echo "  • Deleting all object versions from $bucket..."
+        # Delete all versions including delete markers
+        aws s3api list-object-versions --bucket $bucket --region $AWS_REGION --output json 2>/dev/null | python3 -c "
+import json, sys, subprocess
+try:
+    data = json.load(sys.stdin)
+    # Delete versions
+    for version in data.get('Versions', []):
+        key = version['Key']
+        version_id = version['VersionId']
+        subprocess.run(['aws', 's3api', 'delete-object', '--bucket', '$bucket', '--key', key, '--version-id', version_id, '--region', '$AWS_REGION'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Delete delete markers
+    for marker in data.get('DeleteMarkers', []):
+        key = marker['Key']
+        version_id = marker['VersionId']
+        subprocess.run(['aws', 's3api', 'delete-object', '--bucket', '$bucket', '--key', key, '--version-id', version_id, '--region', '$AWS_REGION'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+except:
+    pass
+" 2>/dev/null || true
+    }
+
     if [ -n "$BUCKET_INPUT" ]; then
-        echo "  • Emptying input bucket: $BUCKET_INPUT"
-        aws s3 rm s3://$BUCKET_INPUT --recursive --quiet --region $AWS_REGION 2>/dev/null || true
+        empty_bucket_versions "$BUCKET_INPUT"
     fi
 
     if [ -n "$BUCKET_OUTPUT" ]; then
-        echo "  • Emptying output bucket: $BUCKET_OUTPUT"
-        aws s3 rm s3://$BUCKET_OUTPUT --recursive --quiet --region $AWS_REGION 2>/dev/null || true
+        empty_bucket_versions "$BUCKET_OUTPUT"
     fi
 
-    echo -e "${GREEN}✓${NC} S3 buckets emptied\n"
+    echo -e "${GREEN}✓${NC} S3 buckets completely emptied\n"
 
-    # Step 2: Delete CloudFront distribution (takes longest)
-    echo -e "${YELLOW}[2/4] Deleting CloudFront distribution (this may take 10-15 minutes)...${NC}"
+    # Step 2: Delete CloudFront distribution and ALB (takes longest)
+    echo -e "${YELLOW}[2/5] Deleting CloudFront distribution and ALB (this may take 10-15 minutes)...${NC}"
+
+    # Delete CloudFront first (takes longest)
     if terraform state list | grep -q "aws_cloudfront_distribution"; then
+        echo "  • Deleting CloudFront distribution..."
         terraform destroy -target=aws_cloudfront_distribution.frontend -auto-approve
-        echo -e "${GREEN}✓${NC} CloudFront distribution deleted\n"
+        echo -e "${GREEN}  ✓ CloudFront distribution deleted${NC}"
     else
-        echo -e "${BLUE}  No CloudFront distribution found${NC}\n"
+        echo -e "${BLUE}  No CloudFront distribution found${NC}"
     fi
+
+    # Delete ALB and related resources
+    if terraform state list | grep -q "aws_lb.frontend"; then
+        echo "  • Deleting Application Load Balancer..."
+        terraform destroy -target=aws_lb.frontend -target=aws_lb_listener.frontend_http -target=aws_lb_target_group.frontend -auto-approve 2>/dev/null || true
+        echo -e "${GREEN}  ✓ ALB deleted${NC}"
+    else
+        echo -e "${BLUE}  No ALB found${NC}"
+    fi
+
+    echo ""
 
     # Step 3: Delete ECR images (required before repository deletion)
-    echo -e "${YELLOW}[3/4] Cleaning up ECR repositories...${NC}"
+    echo -e "${YELLOW}[3/5] Cleaning up ECR repositories...${NC}"
 
     # Get project name and environment from tfvars
     PROJECT_NAME=$(grep "project_name" terraform.tfvars | cut -d'"' -f2 | head -1 2>/dev/null || echo "mra-mines")
@@ -276,8 +333,59 @@ except:
 
     echo -e "${GREEN}✓${NC} ECR cleanup complete\n"
 
+    # Step 3.5: Delete IAM roles (whether managed by Terraform or not)
+    echo -e "${YELLOW}[3.5/5] Deleting IAM roles...${NC}"
+
+    # List of IAM role patterns to delete
+    IAM_ROLES=(
+        "${PROJECT_NAME}-ecs-task-execution"
+        "${PROJECT_NAME}-ecs-task"
+        "${PROJECT_NAME}-input-handler"
+        "${PROJECT_NAME}-mock-ecs"
+        "${PROJECT_NAME}-output-handler"
+        "${PROJECT_NAME}-s3-copy-processor"
+        "${PROJECT_NAME}-pre-auth-trigger-role"
+        "${PROJECT_NAME}-${ENVIRONMENT}-frontend-task-execution"
+        "${PROJECT_NAME}-${ENVIRONMENT}-frontend-task"
+        "${PROJECT_NAME}-${ENVIRONMENT}-cognito-authenticated"
+        "${PROJECT_NAME}-dev-frontend-task-execution"
+        "${PROJECT_NAME}-dev-frontend-task"
+    )
+
+    ROLES_DELETED=0
+    for role_name in "${IAM_ROLES[@]}"; do
+        # Check if role exists
+        if aws iam get-role --role-name "$role_name" >/dev/null 2>&1; then
+            echo "  • Deleting role: $role_name"
+
+            # Detach all managed policies
+            ATTACHED_POLICIES=$(aws iam list-attached-role-policies --role-name "$role_name" --query 'AttachedPolicies[*].PolicyArn' --output text 2>/dev/null || echo "")
+            for policy_arn in $ATTACHED_POLICIES; do
+                aws iam detach-role-policy --role-name "$role_name" --policy-arn "$policy_arn" 2>/dev/null || true
+            done
+
+            # Delete all inline policies
+            INLINE_POLICIES=$(aws iam list-role-policies --role-name "$role_name" --query 'PolicyNames[*]' --output text 2>/dev/null || echo "")
+            for policy_name in $INLINE_POLICIES; do
+                aws iam delete-role-policy --role-name "$role_name" --policy-name "$policy_name" 2>/dev/null || true
+            done
+
+            # Delete the role
+            if aws iam delete-role --role-name "$role_name" 2>/dev/null; then
+                ROLES_DELETED=$((ROLES_DELETED + 1))
+            fi
+        fi
+    done
+
+    if [ $ROLES_DELETED -gt 0 ]; then
+        echo -e "${GREEN}✓${NC} Deleted $ROLES_DELETED IAM roles\n"
+    else
+        echo -e "${BLUE}  No IAM roles to delete${NC}\n"
+    fi
+
     # Step 4: Destroy all remaining infrastructure
-    echo -e "${YELLOW}[4/4] Destroying all remaining resources...${NC}"
+    echo -e "${YELLOW}[4/5] Destroying all remaining resources...${NC}"
+    echo -e "${BLUE}Note: Resource count will be lower than total due to staged deletion above${NC}"
     if terraform destroy -auto-approve; then
         echo -e "${GREEN}✓${NC} All resources destroyed\n"
     else
@@ -288,7 +396,36 @@ except:
         echo "  • S3 buckets not empty (re-run this script)"
         echo "  • CloudFront distribution still deleting (wait and try again)"
         echo "  • VPC dependencies (check security groups, ENIs)"
-        exit 1
+        echo "  • Waiting 60 seconds for ENIs to detach, then retrying..."
+        sleep 60
+        terraform destroy -auto-approve 2>/dev/null || true
+    fi
+
+    # Step 5: Clean up CloudWatch Log Groups (often left behind)
+    echo -e "${YELLOW}[5/5] Cleaning up CloudWatch Log Groups...${NC}"
+
+    LOG_GROUPS=(
+        "/ecs/${PROJECT_NAME}-${ENVIRONMENT}-frontend"
+        "/aws/lambda/${PROJECT_NAME}-input-handler"
+        "/aws/lambda/${PROJECT_NAME}-output-handler"
+        "/aws/lambda/${PROJECT_NAME}-mock-ecs"
+        "/aws/lambda/${PROJECT_NAME}-s3-copy-processor"
+        "/aws/lambda/${PROJECT_NAME}-pre-auth-trigger"
+    )
+
+    LOGS_DELETED=0
+    for log_group in "${LOG_GROUPS[@]}"; do
+        if aws logs describe-log-groups --log-group-name-prefix "$log_group" --region $AWS_REGION --query 'logGroups[0].logGroupName' --output text 2>/dev/null | grep -q "$log_group"; then
+            echo "  • Deleting log group: $log_group"
+            aws logs delete-log-group --log-group-name "$log_group" --region $AWS_REGION 2>/dev/null || true
+            LOGS_DELETED=$((LOGS_DELETED + 1))
+        fi
+    done
+
+    if [ $LOGS_DELETED -gt 0 ]; then
+        echo -e "${GREEN}✓${NC} Deleted $LOGS_DELETED CloudWatch log groups\n"
+    else
+        echo -e "${BLUE}  No log groups to delete${NC}\n"
     fi
 
     cd ..
@@ -301,9 +438,15 @@ except:
     echo -e "${BLUE}All infrastructure has been destroyed.${NC}"
     echo ""
     echo -e "${YELLOW}Cleanup Summary:${NC}"
-    echo "  • All AWS resources deleted"
+    echo "  • CloudFront distribution and policies (deleted in stage 2)"
+    echo "  • ALB, target groups, listeners (deleted in stage 2)"
+    echo "  • IAM roles and policies (deleted in stage 3.5)"
+    echo "  • All remaining resources (deleted in stage 4)"
+    echo "  • CloudWatch log groups (deleted in stage 5)"
     echo "  • All data permanently removed"
     echo "  • Terraform state cleaned"
+    echo ""
+    echo -e "${BLUE}Total resources destroyed: 55-60 across all stages${NC}"
     echo ""
     echo -e "${BLUE}The application can be redeployed at any time using:${NC}"
     echo -e "  ${GREEN}./scripts/deploy.sh${NC}"

@@ -68,8 +68,14 @@ resource "aws_cognito_user_pool_client" "web" {
 	allowed_oauth_flows_user_pool_client = true
 	allowed_oauth_flows              = ["code"]
 	allowed_oauth_scopes             = ["openid", "email", "profile"]
-	callback_urls                    = var.cognito_callback_urls
-	logout_urls                      = var.cognito_logout_urls
+	callback_urls                    = [
+		"http://localhost:5173/auth/callback",
+		"https://${aws_cloudfront_distribution.frontend.domain_name}/auth/callback"
+	]
+	logout_urls                      = [
+		"http://localhost:5173/",
+		"https://${aws_cloudfront_distribution.frontend.domain_name}/"
+	]
 	supported_identity_providers     = ["COGNITO"]
 	prevent_user_existence_errors    = "ENABLED"
 	refresh_token_validity           = 30

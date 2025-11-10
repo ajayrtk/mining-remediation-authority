@@ -194,7 +194,7 @@ resource "aws_ecs_task_definition" "frontend" {
       },
       {
         name  = "PUBLIC_COGNITO_IDENTITY_POOL_ID"
-        value = "eu-west-1:eabdef32-57d3-40ae-87a1-6e9ef7a5d332"
+        value = aws_cognito_identity_pool.main.id
       },
       # Server-side variables - only available in server code
       {
@@ -241,6 +241,12 @@ resource "aws_ecs_task_definition" "frontend" {
       {
         name  = "MAP_OUTPUT_BUCKET"
         value = aws_s3_bucket.map_outputs.bucket
+      },
+      # SvelteKit ORIGIN - tells adapter-node the correct public URL
+      # This ensures url.origin returns CloudFront URL, not ALB DNS
+      {
+        name  = "ORIGIN"
+        value = "https://${aws_cloudfront_distribution.frontend.domain_name}"
       }
     ]
 
@@ -259,7 +265,7 @@ resource "aws_ecs_task_definition" "frontend" {
   tags = local.tags
 }
 
-# ECS Service for Frontend (No Load Balancer)
+# ECS Service for Frontend (With ALB Integration)
 resource "aws_ecs_service" "frontend" {
   name            = "${var.project_name}-${var.environment}-frontend"
   cluster         = aws_ecs_cluster.main.id
@@ -270,15 +276,24 @@ resource "aws_ecs_service" "frontend" {
   network_configuration {
     subnets          = [aws_subnet.public_a.id, aws_subnet.public_b.id]
     security_groups  = [aws_security_group.frontend_ecs.id]
-    assign_public_ip = true  # Important: assigns public IP to task
+    assign_public_ip = true  # Keep public IP for internet access (no NAT Gateway needed)
   }
+
+  # Load Balancer Configuration
+  load_balancer {
+    target_group_arn = aws_lb_target_group.frontend.arn
+    container_name   = "frontend"
+    container_port   = 3000
+  }
+
+  # Wait for ALB listener before creating service
+  depends_on = [
+    aws_lb_listener.frontend_http,
+    aws_iam_role_policy.frontend_task_permissions
+  ]
 
   # Force new deployment when task definition changes
   force_new_deployment = true
-
-  depends_on = [
-    aws_iam_role_policy.frontend_task_permissions
-  ]
 
   tags = local.tags
 }
@@ -299,27 +314,25 @@ output "frontend_access_instructions" {
   value       = <<-EOT
 
   ========================================
-  Frontend Deployment Instructions
+  Frontend Application Access
   ========================================
 
-  1. Get the public IP of the running task:
+  Application URL: https://${aws_cloudfront_distribution.frontend.domain_name}
 
-     aws ecs list-tasks --cluster ${aws_ecs_cluster.main.name} --service-name ${aws_ecs_service.frontend.name} --query 'taskArns[0]' --output text | xargs -I {} aws ecs describe-tasks --cluster ${aws_ecs_cluster.main.name} --tasks {} --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text | xargs -I {} aws ec2 describe-network-interfaces --network-interface-ids {} --query 'NetworkInterfaces[0].Association.PublicIp' --output text
+  Architecture:
+  - CloudFront (HTTPS, global CDN) → ALB (stable) → ECS Tasks (auto-healing)
 
-  2. Access the frontend at:
-     http://<PUBLIC_IP>:3000
+  Benefits:
+  ✓ HTTPS enabled (Cognito authentication works)
+  ✓ Stable origin (no 504 errors on task restarts)
+  ✓ Global performance (CloudFront edge caching)
+  ✓ Auto-healing (ALB health checks)
 
-  Note: The IP address will change if the task is restarted.
-  For production, consider using a Load Balancer for a stable URL.
+  ALB DNS: ${aws_lb.frontend.dns_name}
 
-  To get the current public IP, run:
-  cd infra && terraform output -raw frontend_ip_command | bash
+  Check ALB target health:
+  aws elbv2 describe-target-health --target-group-arn ${aws_lb_target_group.frontend.arn} --region ${var.aws_region}
 
   ========================================
   EOT
-}
-
-output "frontend_ip_command" {
-  description = "Command to get the current public IP"
-  value = "aws ecs list-tasks --cluster ${aws_ecs_cluster.main.name} --service-name ${aws_ecs_service.frontend.name} --region ${var.aws_region} --query 'taskArns[0]' --output text | xargs -I {} aws ecs describe-tasks --cluster ${aws_ecs_cluster.main.name} --tasks {} --region ${var.aws_region} --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text | xargs -I {} aws ec2 describe-network-interfaces --network-interface-ids {} --region ${var.aws_region} --query 'NetworkInterfaces[0].Association.PublicIp' --output text"
 }

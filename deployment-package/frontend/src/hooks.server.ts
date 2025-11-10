@@ -5,25 +5,30 @@ import { getSession, updateSession, deleteSession } from '$lib/server/session-st
 const SESSION_COOKIE = 'mapml-session';
 
 
-const cookieOptions = (event: Parameters<Handle>[0]['event']) => ({
+const cookieOptions = () => ({
 	httpOnly: true,
 	sameSite: 'lax' as const,
-	secure: event.url.protocol === 'https:',
+	secure: true,
 	path: '/',
 	maxAge: 60 * 60 * 24 * 7 // one week, refresh will extend
 });
 
 export const handle: Handle = async ({ event, resolve }) => {
-	const redirectUri = `${event.url.origin}/auth/callback`;
+	console.log('[Hooks] Processing request:', event.url.pathname);
 	const sessionId = event.cookies.get(SESSION_COOKIE);
+	console.log('[Hooks] Session cookie present:', !!sessionId);
+	if (sessionId) {
+		console.log('[Hooks] Session ID:', sessionId.substring(0, 10) + '...');
+	}
 	let session = sessionId ? getSession(sessionId) : null;
+	console.log('[Hooks] Session found in store:', !!session);
 	let sessionWasUpdated = false;
 	let sessionWasCleared = false;
 
 	if (session && session.expiresAt <= Date.now()) {
 		if (session.refreshToken) {
 			try {
-				const refreshed = await refreshTokens(session.refreshToken, event.fetch, redirectUri);
+				const refreshed = await refreshTokens(session.refreshToken, event.fetch);
 				const expiresAt = Date.now() + refreshed.expires_in * 1000 - 60_000; // 1 min margin
 				const user = await fetchUserProfile(refreshed.access_token, event.fetch);
 				session = {
@@ -46,6 +51,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 
 	event.locals.user = session?.user ?? null;
+	console.log('[Hooks] User set in locals:', !!event.locals.user);
 
 	const response = await resolve(event);
 
@@ -53,7 +59,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 		updateSession(sessionId, session);
 	} else if (!session && sessionWasCleared && sessionId) {
 		deleteSession(sessionId);
-		event.cookies.delete(SESSION_COOKIE, { ...cookieOptions(event), maxAge: undefined });
+		event.cookies.delete(SESSION_COOKIE, {
+			path: '/',
+			httpOnly: true,
+			secure: true
+		});
 	}
 
 	return response;
