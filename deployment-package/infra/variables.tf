@@ -1,7 +1,7 @@
 variable "aws_region" {
 	type        = string
 	description = "AWS region for all resources"
-	default     = "eu-west-1"
+	default     = "eu-west-2"
 }
 
 variable "project_name" {
@@ -63,23 +63,11 @@ variable "cognito_domain_prefix" {
 	default     = ""
 }
 
-variable "cognito_callback_urls" {
-	type        = list(string)
-	description = "Allowed OAuth callback URLs for the Cognito app client"
-	default     = [
-		"http://localhost:5173/auth/callback",
-		"https://d3n47138ce9sz5.cloudfront.net/auth/callback"
-	]
-}
-
-variable "cognito_logout_urls" {
-	type        = list(string)
-	description = "Allowed sign-out URLs for the Cognito app client"
-	default     = [
-		"http://localhost:5173/",
-		"https://d3n47138ce9sz5.cloudfront.net/"
-	]
-}
+# NOTE: Cognito callback URLs are now hardcoded in cognito.tf to use ALB DNS
+# These variables were removed after CloudFront removal (no longer needed)
+# Cognito is now configured directly in cognito.tf with:
+#   - http://localhost:5173/auth/callback (for local dev)
+#   - https://${aws_lb.frontend.dns_name}/auth/callback (for production)
 
 variable "frontend_origin_domain" {
 	type        = string

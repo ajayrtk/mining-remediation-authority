@@ -3,7 +3,7 @@
 
 # ECR Repository for processor container
 resource "aws_ecr_repository" "processor" {
-	name                 = "${var.project_name}-processor"
+	name                 = "${var.project_name}-processor-${var.environment}"
 	image_tag_mutability = "MUTABLE"
 	force_delete         = true  # Allow deletion even if images exist
 
@@ -16,7 +16,7 @@ resource "aws_ecr_repository" "processor" {
 
 # ECS Cluster
 resource "aws_ecs_cluster" "main" {
-	name = "${var.project_name}-cluster"
+	name = "${var.project_name}-cluster-${var.environment}"
 
 	setting {
 		name  = "containerInsights"
@@ -29,7 +29,7 @@ resource "aws_ecs_cluster" "main" {
 # Task execution role - allows ECS to pull images
 resource "aws_iam_role" "ecs_task_execution" {
 	count = var.use_existing_iam_roles ? 0 : 1
-	name  = "${var.project_name}-ecs-task-execution"
+	name  = "${var.project_name}-ecs-task-execution-${var.environment}"
 
 	assume_role_policy = jsonencode({
 		Version = "2012-10-17"
@@ -56,7 +56,7 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution" {
 # Additional policy for CloudWatch log group creation
 resource "aws_iam_role_policy" "ecs_task_execution_logs" {
 	count = var.use_existing_iam_roles ? 0 : 1
-	name  = "${var.project_name}-ecs-task-execution-logs"
+	name  = "${var.project_name}-ecs-task-execution-logs-${var.environment}"
 	role  = aws_iam_role.ecs_task_execution[0].id
 
 	policy = jsonencode({
@@ -78,7 +78,7 @@ resource "aws_iam_role_policy" "ecs_task_execution_logs" {
 # Task role - permissions for container to access S3
 resource "aws_iam_role" "ecs_task" {
 	count = var.use_existing_iam_roles ? 0 : 1
-	name  = "${var.project_name}-ecs-task"
+	name  = "${var.project_name}-ecs-task-${var.environment}"
 
 	assume_role_policy = jsonencode({
 		Version = "2012-10-17"
@@ -98,7 +98,7 @@ resource "aws_iam_role" "ecs_task" {
 
 resource "aws_iam_role_policy" "ecs_task" {
 	count = var.use_existing_iam_roles ? 0 : 1
-	name  = "${var.project_name}-ecs-task"
+	name  = "${var.project_name}-ecs-task-${var.environment}"
 	role  = aws_iam_role.ecs_task[0].id
 
 	policy = jsonencode({
@@ -148,7 +148,7 @@ resource "aws_iam_role_policy" "ecs_task" {
 
 # ECS Task Definition
 resource "aws_ecs_task_definition" "processor" {
-	family                   = "${var.project_name}-processor"
+	family                   = "${var.project_name}-processor-${var.environment}"
 	network_mode             = "awsvpc"
 	requires_compatibilities = ["FARGATE"]
 	cpu                      = "256"  # 0.25 vCPU
@@ -165,7 +165,7 @@ resource "aws_ecs_task_definition" "processor" {
 			logConfiguration = {
 				logDriver = "awslogs"
 				options = {
-					"awslogs-group"         = "/ecs/${var.project_name}-processor"
+					"awslogs-group"         = "/ecs/${var.project_name}-processor-${var.environment}"
 					"awslogs-region"        = data.aws_region.current.name
 					"awslogs-stream-prefix" = "ecs"
 					"awslogs-create-group"  = "true"
@@ -202,7 +202,7 @@ resource "aws_ecs_task_definition" "processor" {
 
 # Security Group for ECS tasks
 resource "aws_security_group" "ecs_tasks" {
-	name        = "${var.project_name}-ecs-tasks"
+	name        = "${var.project_name}-ecs-tasks-${var.environment}"
 	description = "Security group for ECS processor tasks"
 	vpc_id      = aws_vpc.main.id
 

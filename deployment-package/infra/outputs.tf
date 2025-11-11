@@ -94,3 +94,22 @@ output "public_subnet_ids" {
 	value       = [aws_subnet.public_a.id, aws_subnet.public_b.id]
 	description = "Public subnet IDs for ECS tasks"
 }
+
+# ======================
+# Application Access URL
+# ======================
+
+output "application_url" {
+	value       = "https://${aws_lb.frontend.dns_name}"
+	description = "⭐ Main application URL (HTTPS) - Use this to access the application"
+}
+
+output "project_name" {
+	value       = var.project_name
+	description = "Project name used in resource naming"
+}
+
+output "environment" {
+	value       = var.environment
+	description = "Environment name used in resource naming"
+}

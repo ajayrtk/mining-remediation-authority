@@ -26,27 +26,31 @@ fi
 # Get deployment information
 echo -e "${YELLOW}Deployment Information:${NC}"
 AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-# Get region from terraform.tfvars
-AWS_REGION=$(grep -E '^\s*aws_region\s*=' infra/terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/' || echo "eu-central-1")
+# Get configuration from terraform.tfvars
+AWS_REGION=$(grep -E '^\s*aws_region\s*=' infra/terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' || echo "eu-central-1")
+PROJECT_NAME=$(grep -E '^\s*project_name\s*=' infra/terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' || echo "mra-mines")
+ENVIRONMENT=$(grep -E '^\s*environment\s*=' infra/terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' || echo "staging")
 AWS_USER=$(aws sts get-caller-identity --query Arn --output text | awk -F'/' '{print $NF}')
 
 echo -e "  AWS Account: ${BLUE}${AWS_ACCOUNT}${NC}"
 echo -e "  AWS Region:  ${BLUE}${AWS_REGION}${NC}"
+echo -e "  Project:     ${BLUE}${PROJECT_NAME}${NC}"
+echo -e "  Environment: ${BLUE}${ENVIRONMENT}${NC}"
 echo -e "  Deployed by: ${BLUE}${AWS_USER}${NC}"
 echo ""
 
 # Confirmation
 echo -e "${YELLOW}This will deploy the following resources:${NC}"
 echo "  • VPC and networking infrastructure"
+echo "  • Application Load Balancer with HTTPS"
 echo "  • ECS cluster and task definitions"
-echo "  • CloudFront distribution with HTTPS"
 echo "  • Cognito user pool for authentication"
 echo "  • DynamoDB tables for data storage"
 echo "  • S3 buckets for file storage"
 echo "  • Lambda functions for processing"
 echo "  • ECR repositories for Docker images"
 echo ""
-echo -e "${YELLOW}Estimated cost: $25-50/month${NC}"
+echo -e "${YELLOW}Estimated cost: $32-62/month${NC}"
 echo ""
 
 read -p "Do you want to proceed? (yes/no): " confirm
@@ -88,7 +92,7 @@ fi
 
 # Get outputs
 FRONTEND_ECR=$(terraform output -raw frontend_ecr_repository_url 2>/dev/null || echo "")
-CLOUDFRONT_URL=$(terraform output -raw cloudfront_url 2>/dev/null || echo "")
+APPLICATION_URL=$(terraform output -raw application_url 2>/dev/null || echo "")
 COGNITO_POOL_ID=$(terraform output -raw cognito_user_pool_id 2>/dev/null || echo "")
 
 echo -e "${GREEN}✓${NC} Infrastructure deployed\n"
@@ -139,11 +143,11 @@ aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS 
 
 # Build Docker image
 echo "  • Building Docker image for linux/amd64 platform..."
-docker build --platform linux/amd64 -t mra-mines-processor:latest .
+docker build --platform linux/amd64 -t ${PROJECT_NAME}-processor:latest .
 
 # Tag the image
 echo "  • Tagging image..."
-docker tag mra-mines-processor:latest ${PROCESSOR_ECR}:latest
+docker tag ${PROJECT_NAME}-processor:latest ${PROCESSOR_ECR}:latest
 
 # Push to ECR
 echo "  • Pushing image to ECR..."
@@ -195,46 +199,22 @@ if [ -n "$SERVICE_NAME" ] && [ -n "$CLUSTER_NAME" ]; then
     fi
     set -e  # Re-enable exit on error
 
-    # Note: With ALB + CloudFront architecture, no manual origin updates needed!
-    # ALB automatically registers new ECS tasks, CloudFront points to stable ALB DNS
+    # Note: ALB automatically registers new ECS tasks
+    # Cognito is configured to use ALB URL in cognito.tf
     echo -e "${GREEN}  ✓ ALB will automatically register the new task${NC}\n"
 else
     echo -e "${YELLOW}⚠ ECS configuration not available${NC}\n"
 fi
 
-# Step 7: Update Cognito callback URLs with CloudFront URL
-echo -e "${BLUE}[7/8]${NC} ${YELLOW}Updating Cognito callback URLs...${NC}"
+# Step 7: Verify Cognito configuration
+echo -e "${BLUE}[7/8]${NC} ${YELLOW}Verifying Cognito configuration...${NC}"
 
-if [ -n "$CLOUDFRONT_URL" ]; then
-    echo "  • CloudFront URL: $CLOUDFRONT_URL"
-
-    # Update terraform.tfvars with correct Cognito callback URLs
-    if grep -q "cognito_callback_urls" terraform.tfvars 2>/dev/null; then
-        # Update callback URLs
-        sed -i.bak "/cognito_callback_urls/,/\]/c\\
-cognito_callback_urls = [\\
-  \"http://localhost:5173/auth/callback\",\\
-  \"$CLOUDFRONT_URL/auth/callback\"\\
-]" terraform.tfvars
-
-        # Update logout URLs
-        sed -i.bak "/cognito_logout_urls/,/\]/c\\
-cognito_logout_urls = [\\
-  \"http://localhost:5173/\",\\
-  \"$CLOUDFRONT_URL/\"\\
-]" terraform.tfvars
-
-        echo "  • Updating Cognito with new callback URLs..."
-        if terraform apply -auto-approve >/dev/null 2>&1; then
-            echo -e "${GREEN}✓${NC} Cognito callback URLs updated\n"
-        else
-            echo -e "${YELLOW}⚠${NC} Cognito update had warnings (this is usually safe to ignore)\n"
-        fi
-    else
-        echo -e "${YELLOW}⚠${NC} cognito_callback_urls not found in terraform.tfvars, skipping\n"
-    fi
+if [ -n "$APPLICATION_URL" ]; then
+    echo "  • Application URL: $APPLICATION_URL"
+    echo -e "${GREEN}  ✓ Cognito is configured with ALB callback URLs${NC}"
+    echo -e "${BLUE}    (Configured in cognito.tf to use ALB DNS)${NC}\n"
 else
-    echo -e "${YELLOW}⚠${NC} CloudFront URL not available, skipping Cognito callback update\n"
+    echo -e "${YELLOW}⚠${NC} Application URL not available\n"
 fi
 
 # Step 8: Create default admin user
@@ -303,7 +283,8 @@ cd infra 2>/dev/null || cd ../infra 2>/dev/null
 CLUSTER_NAME=$(terraform output -raw ecs_cluster_name 2>/dev/null || echo "")
 SERVICE_NAME=$(terraform output -raw frontend_service_name 2>/dev/null || echo "")
 COGNITO_POOL_ID=$(terraform output -raw cognito_user_pool_id 2>/dev/null || echo "")
-CLOUDFRONT_URL=$(terraform output -raw cloudfront_url 2>/dev/null || echo "")
+APPLICATION_URL=$(terraform output -raw application_url 2>/dev/null || echo "")
+ALB_DNS=$(terraform output -raw alb_dns_name 2>/dev/null || echo "")
 USER_NAME=$(grep -E '^\s*admin_username\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/' 2>/dev/null || echo "admin")
 
 VERIFICATION_FAILED=false
@@ -322,24 +303,35 @@ else
     VERIFICATION_FAILED=true
 fi
 
-# Check CloudFront distribution status
-echo -n "  • CloudFront Status: "
-CF_STATUS=$(aws cloudfront get-distribution --id $(terraform output -raw cloudfront_distribution_id 2>/dev/null) --query 'Distribution.Status' --output text 2>/dev/null || echo "Unknown")
-if [ "$CF_STATUS" = "Deployed" ]; then
-    echo -e "${GREEN}✓ Deployed${NC}"
+# Check ALB health
+echo -n "  • ALB Status: "
+if [ -n "$ALB_DNS" ]; then
+    ALB_STATUS=$(aws elbv2 describe-load-balancers --region $AWS_REGION --query "LoadBalancers[?DNSName=='$ALB_DNS'].State.Code" --output text 2>/dev/null || echo "unknown")
+    if [ "$ALB_STATUS" = "active" ]; then
+        echo -e "${GREEN}✓ Active${NC}"
+    else
+        echo -e "${YELLOW}⚠ $ALB_STATUS${NC}"
+    fi
 else
-    echo -e "${YELLOW}⚠ $CF_STATUS (may still be propagating)${NC}"
+    echo -e "${RED}✗ Not Found${NC}"
+    VERIFICATION_FAILED=true
 fi
 
 # Check application accessibility
 echo -n "  • Application Response: "
-HTTP_CODE=$(timeout 20 curl -s -o /dev/null -w "%{http_code}" "$CLOUDFRONT_URL" 2>/dev/null || echo "000")
-if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "301" ] || [ "$HTTP_CODE" = "302" ]; then
-    echo -e "${GREEN}✓ HTTP $HTTP_CODE${NC}"
-elif [ "$HTTP_CODE" = "000" ]; then
-    echo -e "${YELLOW}⚠ Timeout (CloudFront may still be propagating)${NC}"
+if [ -n "$APPLICATION_URL" ]; then
+    # Note: Self-signed cert will cause curl to fail without -k flag
+    HTTP_CODE=$(timeout 20 curl -k -s -o /dev/null -w "%{http_code}" "$APPLICATION_URL" 2>/dev/null || echo "000")
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "301" ] || [ "$HTTP_CODE" = "302" ]; then
+        echo -e "${GREEN}✓ HTTP $HTTP_CODE${NC}"
+    elif [ "$HTTP_CODE" = "000" ]; then
+        echo -e "${YELLOW}⚠ Timeout (ALB may still be initializing)${NC}"
+    else
+        echo -e "${YELLOW}⚠ HTTP $HTTP_CODE${NC}"
+    fi
 else
-    echo -e "${YELLOW}⚠ HTTP $HTTP_CODE${NC}"
+    echo -e "${RED}✗ URL not available${NC}"
+    VERIFICATION_FAILED=true
 fi
 
 # Check Cognito
@@ -376,7 +368,9 @@ else
 fi
 
 echo -e "${BLUE}Your application is ready at:${NC}"
-echo -e "${GREEN}${CLOUDFRONT_URL}${NC}\n"
+echo -e "${GREEN}${APPLICATION_URL}${NC}"
+echo -e "${YELLOW}Note: Browser will show certificate warning (self-signed HTTPS cert)${NC}"
+echo -e "${YELLOW}      This is expected for internal use. Click 'Advanced' and proceed.${NC}\n"
 
 echo -e "${YELLOW}Login Credentials:${NC}"
 echo -e "  Username: ${GREEN}$USER_NAME${NC}"
@@ -384,9 +378,10 @@ echo -e "  Password: ${GREEN}$ADMIN_PASSWORD${NC}"
 echo -e "  ${RED}⚠ IMPORTANT: Change your password after first login!${NC}\n"
 
 echo -e "${YELLOW}Next Steps:${NC}"
-echo -e "  1. Visit ${CLOUDFRONT_URL}"
-echo -e "  2. Log in with the credentials above"
-echo -e "  3. ${RED}Change your password immediately${NC}"
+echo -e "  1. Visit ${APPLICATION_URL}"
+echo -e "  2. Accept the certificate warning (click Advanced > Proceed)"
+echo -e "  3. Log in with the credentials above"
+echo -e "  4. ${RED}Change your password immediately${NC}"
 echo ""
 
 if [ "$VERIFICATION_FAILED" = true ]; then

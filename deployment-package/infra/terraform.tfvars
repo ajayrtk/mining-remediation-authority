@@ -3,8 +3,8 @@
 
 # ===== CORE SETTINGS (Change these for different environments) =====
 project_name = "mra-mines"
-environment  = "staging"          # Options: "dev", "staging", "prod"
-aws_region   = "eu-central-1"    # AWS region for deployment
+environment  = "dev"          # Options: "dev", "staging", "prod"
+aws_region   = "eu-west-2"    # AWS region for deployment
 
 # ===== S3 BUCKET NAMES =====
 # Use unique names to avoid conflicts with existing buckets

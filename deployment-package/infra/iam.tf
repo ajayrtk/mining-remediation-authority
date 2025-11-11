@@ -19,14 +19,14 @@ data "aws_iam_policy_document" "lambda_assume_role" {
 # --- Input Handler IAM ---
 resource "aws_iam_role" "input_handler" {
 	count              = var.use_existing_iam_roles ? 0 : 1
-	name               = "${var.project_name}-input-handler"
+	name               = "${var.project_name}-input-handler-${var.environment}"
 	assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 	tags               = local.tags
 }
 
 resource "aws_iam_role_policy" "input_handler" {
 	count = var.use_existing_iam_roles ? 0 : 1
-	name  = "${var.project_name}-input-handler"
+	name  = "${var.project_name}-input-handler-${var.environment}"
 	role  = aws_iam_role.input_handler[0].id
 
 	policy = jsonencode({
@@ -73,14 +73,14 @@ resource "aws_iam_role_policy" "input_handler" {
 # --- Mock ECS IAM ---
 resource "aws_iam_role" "mock_ecs" {
 	count              = var.use_existing_iam_roles ? 0 : 1
-	name               = "${var.project_name}-mock-ecs"
+	name               = "${var.project_name}-mock-ecs-${var.environment}"
 	assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 	tags               = local.tags
 }
 
 resource "aws_iam_role_policy" "mock_ecs" {
 	count = var.use_existing_iam_roles ? 0 : 1
-	name  = "${var.project_name}-mock-ecs"
+	name  = "${var.project_name}-mock-ecs-${var.environment}"
 	role  = aws_iam_role.mock_ecs[0].id
 
 	policy = jsonencode({
@@ -109,14 +109,14 @@ resource "aws_iam_role_policy" "mock_ecs" {
 # --- Output Handler IAM ---
 resource "aws_iam_role" "output_handler" {
 	count              = var.use_existing_iam_roles ? 0 : 1
-	name               = "${var.project_name}-output-handler"
+	name               = "${var.project_name}-output-handler-${var.environment}"
 	assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 	tags               = local.tags
 }
 
 resource "aws_iam_role_policy" "output_handler" {
 	count = var.use_existing_iam_roles ? 0 : 1
-	name  = "${var.project_name}-output-handler"
+	name  = "${var.project_name}-output-handler-${var.environment}"
 	role  = aws_iam_role.output_handler[0].id
 
 	policy = jsonencode({
@@ -144,14 +144,14 @@ resource "aws_iam_role_policy" "output_handler" {
 # --- S3 Copy Processor IAM ---
 resource "aws_iam_role" "s3_copy_processor" {
 	count              = var.use_existing_iam_roles ? 0 : 1
-	name               = "${var.project_name}-s3-copy-processor"
+	name               = "${var.project_name}-s3-copy-processor-${var.environment}"
 	assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 	tags               = local.tags
 }
 
 resource "aws_iam_role_policy" "s3_copy_processor" {
 	count = var.use_existing_iam_roles ? 0 : 1
-	name  = "${var.project_name}-s3-copy-processor"
+	name  = "${var.project_name}-s3-copy-processor-${var.environment}"
 	role  = aws_iam_role.s3_copy_processor[0].id
 
 	policy = jsonencode({

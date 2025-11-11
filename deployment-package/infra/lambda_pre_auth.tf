@@ -10,7 +10,7 @@ data "archive_file" "pre_auth_trigger" {
 # Lambda execution role
 resource "aws_iam_role" "pre_auth_trigger" {
 	count = var.use_existing_iam_roles ? 0 : 1
-	name  = "${var.project_name}-pre-auth-trigger-role"
+	name  = "${var.project_name}-pre-auth-trigger-role-${var.environment}"
 
 	assume_role_policy = jsonencode({
 		Version = "2012-10-17"
@@ -32,7 +32,7 @@ resource "aws_iam_role" "pre_auth_trigger" {
 resource "aws_lambda_function" "pre_auth_trigger" {
 	count            = var.use_existing_iam_roles ? 0 : 1
 	filename         = data.archive_file.pre_auth_trigger.output_path
-	function_name    = "${var.project_name}-pre-auth-trigger"
+	function_name    = "${var.project_name}-pre-auth-trigger-${var.environment}"
 	role             = local.pre_auth_trigger_role_arn
 	handler          = "index.handler"
 	source_code_hash = data.archive_file.pre_auth_trigger.output_base64sha256

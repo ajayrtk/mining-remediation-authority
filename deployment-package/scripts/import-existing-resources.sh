@@ -32,17 +32,26 @@ if [ ! -d ".terraform" ]; then
     echo ""
 fi
 
+# Read project name and environment from terraform.tfvars
+PROJECT_NAME=$(grep -E '^\s*project_name\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/' || echo "mra-mines")
+ENVIRONMENT=$(grep -E '^\s*environment\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/' || echo "staging")
+
+echo -e "${YELLOW}Configuration:${NC}"
+echo -e "  Project:     ${BLUE}${PROJECT_NAME}${NC}"
+echo -e "  Environment: ${BLUE}${ENVIRONMENT}${NC}"
+echo ""
+
 echo -e "${YELLOW}Checking for existing IAM roles and importing them...${NC}\n"
 
 # List of IAM roles to check and import
 declare -A IAM_ROLES=(
-    ["aws_iam_role.ecs_task_execution"]="mra-mines-ecs-task-execution"
-    ["aws_iam_role.ecs_task"]="mra-mines-ecs-task"
-    ["aws_iam_role.input_handler"]="mra-mines-input-handler"
-    ["aws_iam_role.mock_ecs"]="mra-mines-mock-ecs"
-    ["aws_iam_role.output_handler"]="mra-mines-output-handler"
-    ["aws_iam_role.s3_copy_processor"]="mra-mines-s3-copy-processor"
-    ["aws_iam_role.pre_auth_trigger"]="mra-mines-pre-auth-trigger-role"
+    ["aws_iam_role.ecs_task_execution"]="${PROJECT_NAME}-ecs-task-execution-${ENVIRONMENT}"
+    ["aws_iam_role.ecs_task"]="${PROJECT_NAME}-ecs-task-${ENVIRONMENT}"
+    ["aws_iam_role.input_handler"]="${PROJECT_NAME}-input-handler-${ENVIRONMENT}"
+    ["aws_iam_role.mock_ecs"]="${PROJECT_NAME}-mock-ecs-${ENVIRONMENT}"
+    ["aws_iam_role.output_handler"]="${PROJECT_NAME}-output-handler-${ENVIRONMENT}"
+    ["aws_iam_role.s3_copy_processor"]="${PROJECT_NAME}-s3-copy-processor-${ENVIRONMENT}"
+    ["aws_iam_role.pre_auth_trigger"]="${PROJECT_NAME}-pre-auth-trigger-role-${ENVIRONMENT}"
 )
 
 IMPORTED_COUNT=0

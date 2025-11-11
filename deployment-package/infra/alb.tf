@@ -1,20 +1,29 @@
 # =====================================================
 # Application Load Balancer for Frontend
 # =====================================================
-# ALB provides stable backend for CloudFront
-# CloudFront → ALB → ECS Tasks
+# ALB provides direct user access with HTTPS
+# Browser → ALB (HTTPS) → ECS Tasks
 
 # Security Group for ALB
 resource "aws_security_group" "alb" {
-  name        = "${var.project_name}-${var.environment}-alb-sg"
+  name        = "${var.project_name}-alb-sg-${var.environment}"
   description = "Security group for Application Load Balancer"
   vpc_id      = aws_vpc.main.id
 
-  # Allow HTTP from anywhere (CloudFront will connect via HTTP)
+  # Allow HTTP from anywhere (will redirect to HTTPS)
   ingress {
     description = "HTTP from anywhere"
     from_port   = 80
     to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Allow HTTPS from anywhere
+  ingress {
+    description = "HTTPS from anywhere"
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -29,7 +38,7 @@ resource "aws_security_group" "alb" {
   }
 
   tags = {
-    Name        = "${var.project_name}-${var.environment}-alb-sg"
+    Name        = "${var.project_name}-alb-sg-${var.environment}"
     Project     = var.project_name
     Environment = var.environment
     ManagedBy   = "Terraform"
@@ -49,7 +58,7 @@ resource "aws_security_group_rule" "ecs_from_alb" {
 
 # Application Load Balancer
 resource "aws_lb" "frontend" {
-  name               = "${var.project_name}-${var.environment}-alb"
+  name               = "${var.project_name}-alb-${var.environment}"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
@@ -59,7 +68,7 @@ resource "aws_lb" "frontend" {
   enable_http2              = true
 
   tags = {
-    Name        = "${var.project_name}-${var.environment}-frontend-alb"
+    Name        = "${var.project_name}-frontend-alb-${var.environment}"
     Project     = var.project_name
     Environment = var.environment
     ManagedBy   = "Terraform"
@@ -68,7 +77,7 @@ resource "aws_lb" "frontend" {
 
 # Target Group for ECS Tasks
 resource "aws_lb_target_group" "frontend" {
-  name        = "${var.project_name}-${var.environment}-tg"
+  name        = "${var.project_name}-tg-${var.environment}"
   port        = 3000
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
@@ -89,18 +98,59 @@ resource "aws_lb_target_group" "frontend" {
   deregistration_delay = 30
 
   tags = {
-    Name        = "${var.project_name}-${var.environment}-frontend-tg"
+    Name        = "${var.project_name}-frontend-tg-${var.environment}"
     Project     = var.project_name
     Environment = var.environment
     ManagedBy   = "Terraform"
   }
 }
 
-# ALB Listener - HTTP on port 80
-resource "aws_lb_listener" "frontend_http" {
+# Create self-signed certificate for HTTPS
+resource "tls_private_key" "alb" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+resource "tls_self_signed_cert" "alb" {
+  private_key_pem = tls_private_key.alb.private_key_pem
+
+  subject {
+    common_name  = "${var.project_name}-${var.environment}.local"
+    organization = var.project_name
+  }
+
+  validity_period_hours = 87600 # 10 years
+
+  allowed_uses = [
+    "key_encipherment",
+    "digital_signature",
+    "server_auth",
+  ]
+}
+
+resource "aws_acm_certificate" "alb_self_signed" {
+  private_key      = tls_private_key.alb.private_key_pem
+  certificate_body = tls_self_signed_cert.alb.cert_pem
+
+  tags = {
+    Name        = "${var.project_name}-alb-cert-${var.environment}"
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# ALB Listener - HTTPS on port 443 (primary)
+resource "aws_lb_listener" "frontend_https" {
   load_balancer_arn = aws_lb.frontend.arn
-  port              = "80"
-  protocol          = "HTTP"
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = aws_acm_certificate.alb_self_signed.arn
 
   default_action {
     type             = "forward"
@@ -108,7 +158,31 @@ resource "aws_lb_listener" "frontend_http" {
   }
 
   tags = {
-    Name        = "${var.project_name}-${var.environment}-listener"
+    Name        = "${var.project_name}-https-listener-${var.environment}"
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
+}
+
+# ALB Listener - HTTP on port 80 (redirects to HTTPS)
+resource "aws_lb_listener" "frontend_http" {
+  load_balancer_arn = aws_lb.frontend.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type = "redirect"
+
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+
+  tags = {
+    Name        = "${var.project_name}-http-listener-${var.environment}"
     Project     = var.project_name
     Environment = var.environment
     ManagedBy   = "Terraform"
@@ -119,6 +193,11 @@ resource "aws_lb_listener" "frontend_http" {
 output "alb_dns_name" {
   description = "DNS name of the Application Load Balancer"
   value       = aws_lb.frontend.dns_name
+}
+
+output "alb_url" {
+  description = "HTTPS URL of the Application Load Balancer (main application URL)"
+  value       = "https://${aws_lb.frontend.dns_name}"
 }
 
 output "alb_arn" {

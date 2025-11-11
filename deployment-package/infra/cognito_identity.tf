@@ -2,7 +2,7 @@
 # Allows authenticated users to get temporary AWS credentials for direct S3 uploads
 
 resource "aws_cognito_identity_pool" "main" {
-  identity_pool_name               = "${var.project_name}-${var.environment}-identity-pool"
+  identity_pool_name               = "${var.project_name}-identity-pool-${var.environment}"
   allow_unauthenticated_identities = false
 
   cognito_identity_providers {
@@ -16,7 +16,7 @@ resource "aws_cognito_identity_pool" "main" {
 
 # IAM role for authenticated users (browser access to S3)
 resource "aws_iam_role" "cognito_authenticated" {
-  name = "${var.project_name}-${var.environment}-cognito-authenticated"
+  name = "${var.project_name}-cognito-authenticated-${var.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -44,7 +44,7 @@ resource "aws_iam_role" "cognito_authenticated" {
 
 # Policy for authenticated users to access S3 buckets
 resource "aws_iam_role_policy" "cognito_authenticated_s3" {
-  name = "${var.project_name}-${var.environment}-cognito-s3-access"
+  name = "${var.project_name}-cognito-s3-access-${var.environment}"
   role = aws_iam_role.cognito_authenticated.id
 
   policy = jsonencode({

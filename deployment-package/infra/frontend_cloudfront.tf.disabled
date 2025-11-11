@@ -4,7 +4,7 @@
 
 # CloudFront Cache Policy
 resource "aws_cloudfront_cache_policy" "frontend" {
-  name        = "${var.project_name}-${var.environment}-cache-policy"
+  name        = "${var.project_name}-cache-policy-${var.environment}"
   comment     = "Cache policy for frontend application"
   default_ttl = 86400
   max_ttl     = 31536000
@@ -27,7 +27,7 @@ resource "aws_cloudfront_cache_policy" "frontend" {
 
 # CloudFront Origin Request Policy
 resource "aws_cloudfront_origin_request_policy" "frontend" {
-  name    = "${var.project_name}-${var.environment}-origin-policy"
+  name    = "${var.project_name}-origin-policy-${var.environment}"
   comment = "Origin request policy for frontend"
 
   cookies_config {
@@ -105,7 +105,7 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   tags = {
-    Name        = "${var.project_name}-${var.environment}-cloudfront"
+    Name        = "${var.project_name}-cloudfront-${var.environment}"
     Project     = var.project_name
     Environment = var.environment
     ManagedBy   = "Terraform"

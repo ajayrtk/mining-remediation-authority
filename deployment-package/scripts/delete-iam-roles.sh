@@ -12,17 +12,31 @@ NC='\033[0m'
 
 echo -e "${YELLOW}Deleting conflicting IAM roles...${NC}\n"
 
-# List of IAM roles to delete
+# Get project name and environment from terraform.tfvars
+if [ -f "infra/terraform.tfvars" ]; then
+    PROJECT_NAME=$(grep -E '^\s*project_name\s*=' infra/terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' 2>/dev/null || echo "mra-mines")
+    ENVIRONMENT=$(grep -E '^\s*environment\s*=' infra/terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' 2>/dev/null || echo "staging")
+else
+    echo -e "${RED}Error: infra/terraform.tfvars not found${NC}"
+    echo "Please run this script from the deployment-package directory"
+    exit 1
+fi
+
+echo -e "${YELLOW}Project: ${PROJECT_NAME}${NC}"
+echo -e "${YELLOW}Environment: ${ENVIRONMENT}${NC}\n"
+
+# List of IAM roles to delete (with environment suffix)
 ROLES=(
-    "mra-mines-ecs-task-execution"
-    "mra-mines-ecs-task"
-    "mra-mines-input-handler"
-    "mra-mines-mock-ecs"
-    "mra-mines-output-handler"
-    "mra-mines-s3-copy-processor"
-    "mra-mines-pre-auth-trigger-role"
-    "mra-mines-dev-frontend-task-execution"
-    "mra-mines-dev-frontend-task"
+    "${PROJECT_NAME}-ecs-task-execution-${ENVIRONMENT}"
+    "${PROJECT_NAME}-ecs-task-${ENVIRONMENT}"
+    "${PROJECT_NAME}-input-handler-${ENVIRONMENT}"
+    "${PROJECT_NAME}-mock-ecs-${ENVIRONMENT}"
+    "${PROJECT_NAME}-output-handler-${ENVIRONMENT}"
+    "${PROJECT_NAME}-s3-copy-processor-${ENVIRONMENT}"
+    "${PROJECT_NAME}-pre-auth-trigger-role-${ENVIRONMENT}"
+    "${PROJECT_NAME}-frontend-task-execution-${ENVIRONMENT}"
+    "${PROJECT_NAME}-frontend-task-${ENVIRONMENT}"
+    "${PROJECT_NAME}-cognito-authenticated-${ENVIRONMENT}"
 )
 
 DELETED=0

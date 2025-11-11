@@ -2,7 +2,7 @@
 
 # Input bucket for uploaded ZIP files
 resource "aws_s3_bucket" "map_input" {
-	bucket        = "${var.project_name}-${var.environment}-${var.map_input_bucket_name}"
+	bucket        = "${var.project_name}-${var.map_input_bucket_name}-${var.environment}"
 	force_destroy = true
 	tags          = local.tags
 }
@@ -60,7 +60,7 @@ resource "aws_s3_bucket_cors_configuration" "map_input" {
 
 # Output bucket for processed files
 resource "aws_s3_bucket" "map_outputs" {
-	bucket        = "${var.project_name}-${var.environment}-${var.map_output_bucket_name}"
+	bucket        = "${var.project_name}-${var.map_output_bucket_name}-${var.environment}"
 	force_destroy = true
 	tags          = local.tags
 }

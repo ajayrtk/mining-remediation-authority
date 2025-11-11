@@ -1,5 +1,36 @@
 # MRA Mines Map - Maintenance Guide
 
+## Resource Naming Convention
+
+All AWS resources follow this naming pattern:
+```
+{project_name}-{resource_name}-{environment}
+```
+
+**Set these variables for commands in this guide:**
+```bash
+# Navigate to infra directory
+cd infra
+
+# Set variables from terraform.tfvars
+export PROJECT=$(terraform output -raw project_name 2>/dev/null || echo "mra-mines")
+export ENV=$(terraform output -raw environment 2>/dev/null || echo "staging")
+export REGION=$(terraform output -raw aws_region)
+
+# Verify
+echo "Project: $PROJECT"
+echo "Environment: $ENV"
+echo "Region: $REGION"
+```
+
+**Common resource names will be:**
+- ECS Cluster: `${PROJECT}-cluster-${ENV}`
+- Frontend Service: `${PROJECT}-frontend-${ENV}`
+- Processor: `${PROJECT}-processor-${ENV}`
+- Lambda Functions: `${PROJECT}-{function-name}-${ENV}`
+
+---
+
 ## Table of Contents
 1. [Daily Operations](#daily-operations)
 2. [Updating the Application](#updating-the-application)
@@ -23,10 +54,11 @@ Perform these checks daily or set up automated monitoring:
 ```bash
 # Check ECS service status
 aws ecs describe-services \
-  --cluster mra-mines-cluster \
-  --services mra-mines-dev-frontend \
+  --cluster ${PROJECT}-cluster-${ENV} \
+  --services ${PROJECT}-frontend-${ENV} \
   --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount}' \
-  --output table
+  --output table \
+  --region $REGION
 
 # Check CloudFront distribution status
 aws cloudfront get-distribution \
@@ -36,9 +68,10 @@ aws cloudfront get-distribution \
 
 # Check recent errors in logs
 aws logs filter-log-events \
-  --log-group-name /ecs/mra-mines-dev-frontend \
+  --log-group-name /ecs/${PROJECT}-frontend-${ENV} \
   --start-time $(date -u -d '1 hour ago' +%s)000 \
-  --filter-pattern "ERROR"
+  --filter-pattern "ERROR" \
+  --region $REGION
 ```
 
 ### User Management
@@ -132,19 +165,21 @@ cd ../infra
 
 # 4. Force ECS service update
 aws ecs update-service \
-  --cluster mra-mines-cluster \
-  --service mra-mines-dev-frontend \
-  --force-new-deployment
+  --cluster ${PROJECT}-cluster-${ENV} \
+  --service ${PROJECT}-frontend-${ENV} \
+  --force-new-deployment \
+  --region $REGION
 
 # 5. Wait for deployment (2-3 minutes)
 aws ecs wait services-stable \
-  --cluster mra-mines-cluster \
-  --services mra-mines-dev-frontend
+  --cluster ${PROJECT}-cluster-${ENV} \
+  --services ${PROJECT}-frontend-${ENV} \
+  --region $REGION
 
 # 6. Get new task DNS and update CloudFront
-NEW_TASK=$(aws ecs list-tasks --cluster mra-mines-cluster --service-name mra-mines-dev-frontend --query 'taskArns[0]' --output text)
+NEW_TASK=$(aws ecs list-tasks --cluster ${PROJECT}-cluster-${ENV} --service-name ${PROJECT}-frontend-${ENV} --query 'taskArns[0]' --output text --region $REGION)
 TASK_ID=$(echo $NEW_TASK | awk -F/ '{print $NF}')
-TASK_DNS=$(aws ecs describe-tasks --cluster mra-mines-cluster --tasks $TASK_ID --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text | xargs -I {} aws ec2 describe-network-interfaces --network-interface-ids {} --query 'NetworkInterfaces[0].Association.PublicDnsName' --output text)
+TASK_DNS=$(aws ecs describe-tasks --cluster ${PROJECT}-cluster-${ENV} --tasks $TASK_ID --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text --region $REGION | xargs -I {} aws ec2 describe-network-interfaces --network-interface-ids {} --query 'NetworkInterfaces[0].Association.PublicDnsName' --output text --region $REGION)
 
 # Apply with new origin
 terraform apply -var="frontend_origin_domain=$TASK_DNS" -auto-approve
@@ -162,20 +197,23 @@ To update Lambda functions:
 cd backend/lambda/<function-name>
 
 # 1. Make code changes
-# 2. Update function code
+# 2. Update function code (example: input-handler)
 zip -r function.zip .
 aws lambda update-function-code \
-  --function-name mra-mines-dev-input-handler \
-  --zip-file fileb://function.zip
+  --function-name ${PROJECT}-input-handler-${ENV} \
+  --zip-file fileb://function.zip \
+  --region $REGION
 
 # 3. Wait for update to complete
 aws lambda wait function-updated \
-  --function-name mra-mines-dev-input-handler
+  --function-name ${PROJECT}-input-handler-${ENV} \
+  --region $REGION
 
 # 4. Verify
 aws lambda get-function \
-  --function-name mra-mines-dev-input-handler \
-  --query 'Configuration.LastModified'
+  --function-name ${PROJECT}-input-handler-${ENV} \
+  --query 'Configuration.LastModified' \
+  --region $REGION
 ```
 
 ### Infrastructure Updates
@@ -261,30 +299,35 @@ aws cloudwatch put-dashboard \
 **View real-time logs:**
 ```bash
 # Frontend logs
-aws logs tail /ecs/mra-mines-dev-frontend --follow
+aws logs tail /ecs/${PROJECT}-frontend-${ENV} --follow --region $REGION
 
-# Lambda logs
-aws logs tail /aws/lambda/mra-mines-dev-input-handler --follow
+# Processor logs
+aws logs tail /ecs/${PROJECT}-processor-${ENV} --follow --region $REGION
+
+# Lambda logs (example: input-handler)
+aws logs tail /aws/lambda/${PROJECT}-input-handler-${ENV} --follow --region $REGION
 
 # Filter for errors
-aws logs tail /ecs/mra-mines-dev-frontend --follow --filter-pattern "ERROR"
+aws logs tail /ecs/${PROJECT}-frontend-${ENV} --follow --filter-pattern "ERROR" --region $REGION
 ```
 
 **Search logs:**
 ```bash
-# Search for specific text
+# Search for specific text in frontend logs
 aws logs filter-log-events \
-  --log-group-name /ecs/mra-mines-dev-frontend \
+  --log-group-name /ecs/${PROJECT}-frontend-${ENV} \
   --start-time $(date -u -d '24 hours ago' +%s)000 \
-  --filter-pattern "AccessDenied"
+  --filter-pattern "AccessDenied" \
+  --region $REGION
 
 # Export logs to S3
 aws logs create-export-task \
-  --log-group-name /ecs/mra-mines-dev-frontend \
+  --log-group-name /ecs/${PROJECT}-frontend-${ENV} \
   --from $(date -u -d '7 days ago' +%s)000 \
   --to $(date -u +%s)000 \
   --destination YOUR_BUCKET_NAME \
-  --destination-prefix logs/
+  --destination-prefix logs/ \
+  --region $REGION
 ```
 
 ### CloudWatch Alarms
@@ -294,7 +337,7 @@ Set up automated alerts:
 ```bash
 # High CPU alarm
 aws cloudwatch put-metric-alarm \
-  --alarm-name mra-mines-high-cpu \
+  --alarm-name ${PROJECT}-high-cpu-${ENV} \
   --alarm-description "Alert when CPU exceeds 80%" \
   --metric-name CPUUtilization \
   --namespace AWS/ECS \
@@ -302,11 +345,12 @@ aws cloudwatch put-metric-alarm \
   --period 300 \
   --threshold 80 \
   --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 2
+  --evaluation-periods 2 \
+  --region $REGION
 
 # Lambda errors alarm
 aws cloudwatch put-metric-alarm \
-  --alarm-name mra-mines-lambda-errors \
+  --alarm-name ${PROJECT}-lambda-errors-${ENV} \
   --alarm-description "Alert on Lambda errors" \
   --metric-name Errors \
   --namespace AWS/Lambda \
@@ -314,7 +358,8 @@ aws cloudwatch put-metric-alarm \
   --period 60 \
   --threshold 5 \
   --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 1
+  --evaluation-periods 1 \
+  --region $REGION
 ```
 
 ### Performance Monitoring
@@ -440,15 +485,17 @@ terraform state push terraform.tfstate.backup-TIMESTAMP
 ```bash
 # Scale up
 aws ecs update-service \
-  --cluster mra-mines-cluster \
-  --service mra-mines-dev-frontend \
-  --desired-count 3
+  --cluster ${PROJECT}-cluster-${ENV} \
+  --service ${PROJECT}-frontend-${ENV} \
+  --desired-count 3 \
+  --region $REGION
 
 # Scale down
 aws ecs update-service \
-  --cluster mra-mines-cluster \
-  --service mra-mines-dev-frontend \
-  --desired-count 1
+  --cluster ${PROJECT}-cluster-${ENV} \
+  --service ${PROJECT}-frontend-${ENV} \
+  --desired-count 1 \
+  --region $REGION
 ```
 
 **Auto-scaling (via Terraform):**

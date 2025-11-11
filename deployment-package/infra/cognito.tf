@@ -15,7 +15,7 @@ locals {
 }
 
 resource "aws_cognito_user_pool" "main" {
-	name = "${var.project_name}-users-pool"
+	name = "${var.project_name}-users-pool-${var.environment}"
 
 	alias_attributes         = ["email"]
 	auto_verified_attributes = ["email"]
@@ -62,7 +62,7 @@ resource "aws_cognito_user_pool_domain" "main" {
 }
 
 resource "aws_cognito_user_pool_client" "web" {
-	name                             = "${var.project_name}-web"
+	name                             = "${var.project_name}-web-${var.environment}"
 	user_pool_id                     = aws_cognito_user_pool.main.id
 	generate_secret                  = false
 	allowed_oauth_flows_user_pool_client = true
@@ -70,11 +70,11 @@ resource "aws_cognito_user_pool_client" "web" {
 	allowed_oauth_scopes             = ["openid", "email", "profile"]
 	callback_urls                    = [
 		"http://localhost:5173/auth/callback",
-		"https://${aws_cloudfront_distribution.frontend.domain_name}/auth/callback"
+		"https://${aws_lb.frontend.dns_name}/auth/callback"
 	]
 	logout_urls                      = [
 		"http://localhost:5173/",
-		"https://${aws_cloudfront_distribution.frontend.domain_name}/"
+		"https://${aws_lb.frontend.dns_name}/"
 	]
 	supported_identity_providers     = ["COGNITO"]
 	prevent_user_existence_errors    = "ENABLED"

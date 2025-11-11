@@ -2,7 +2,7 @@
 
 # MAPS table - Stores map metadata with composite key (mapId + mapName)
 resource "aws_dynamodb_table" "maps" {
-	name         = "${var.project_name}-${var.environment}-${var.maps_table_name}"
+	name         = "${var.project_name}-${var.maps_table_name}-${var.environment}"
 	hash_key     = "mapId"
 	range_key    = "mapName"
 	billing_mode = "PAY_PER_REQUEST"
@@ -66,7 +66,7 @@ resource "aws_dynamodb_table" "maps" {
 
 # MAPJOBS table - Stores job processing attempts (one job can process multiple maps)
 resource "aws_dynamodb_table" "map_jobs" {
-	name         = "${var.project_name}-${var.environment}-${var.map_jobs_table_name}"
+	name         = "${var.project_name}-${var.map_jobs_table_name}-${var.environment}"
 	hash_key     = "jobId"
 	billing_mode = "PAY_PER_REQUEST"
 

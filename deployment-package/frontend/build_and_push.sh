@@ -72,10 +72,10 @@ if [ -z "$SERVICE_NAME" ] || [ -z "$CLUSTER_NAME" ]; then
     ENVIRONMENT=$(grep -E '^\s*environment\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/')
 
     if [ -z "$SERVICE_NAME" ]; then
-        SERVICE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-frontend"
+        SERVICE_NAME="${PROJECT_NAME}-frontend-${ENVIRONMENT}"
     fi
     if [ -z "$CLUSTER_NAME" ]; then
-        CLUSTER_NAME="${PROJECT_NAME}-cluster"
+        CLUSTER_NAME="${PROJECT_NAME}-cluster-${ENVIRONMENT}"
     fi
 fi
 

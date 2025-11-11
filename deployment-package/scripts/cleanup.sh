@@ -22,7 +22,7 @@ cleanup_data_only() {
     echo "  • All files from S3 buckets (input & output)"
     echo ""
     echo -e "${GREEN}This will keep running:${NC}"
-    echo "  • ECS tasks, Lambda functions, CloudFront"
+    echo "  • ECS tasks, Lambda functions, ALB"
     echo "  • All AWS infrastructure"
     echo ""
 
@@ -31,7 +31,7 @@ cleanup_data_only() {
         cd infra
         TERRAFORM_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "")
         if [ -z "$TERRAFORM_REGION" ]; then
-            TERRAFORM_REGION=$(grep -E '^\s*aws_region\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/' 2>/dev/null || echo "")
+            TERRAFORM_REGION=$(grep -E '^\s*aws_region\s*=' terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' 2>/dev/null || echo "")
             AWS_REGION=${TERRAFORM_REGION:-$(aws configure get region)}
         else
             AWS_REGION=$TERRAFORM_REGION
@@ -40,7 +40,7 @@ cleanup_data_only() {
     else
         # Fallback: try to read from terraform.tfvars or AWS CLI config
         if [ -f "infra/terraform.tfvars" ]; then
-            AWS_REGION=$(grep -E '^\s*aws_region\s*=' infra/terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/' 2>/dev/null || aws configure get region)
+            AWS_REGION=$(grep -E '^\s*aws_region\s*=' infra/terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' 2>/dev/null || aws configure get region)
         else
             AWS_REGION=$(aws configure get region)
         fi
@@ -146,7 +146,7 @@ cleanup_infrastructure() {
     echo -e "${RED}================================================${NC}\n"
 
     echo -e "${YELLOW}This script will DELETE ALL infrastructure including:${NC}"
-    echo "  • CloudFront distribution"
+    echo "  • Application Load Balancer (ALB)"
     echo "  • ECS cluster and tasks"
     echo "  • ECR repositories and Docker images"
     echo "  • S3 buckets and ALL uploaded files"
@@ -205,7 +205,7 @@ cleanup_infrastructure() {
     # Get AWS region from Terraform output
     TERRAFORM_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "")
     if [ -z "$TERRAFORM_REGION" ]; then
-        TERRAFORM_REGION=$(grep -E '^\s*aws_region\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/' 2>/dev/null || echo "")
+        TERRAFORM_REGION=$(grep -E '^\s*aws_region\s*=' terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' 2>/dev/null || echo "")
         AWS_REGION=${TERRAFORM_REGION:-$(aws configure get region)}
     else
         AWS_REGION=$TERRAFORM_REGION
@@ -252,23 +252,20 @@ except:
 
     echo -e "${GREEN}✓${NC} S3 buckets completely emptied\n"
 
-    # Step 2: Delete CloudFront distribution and ALB (takes longest)
-    echo -e "${YELLOW}[2/5] Deleting CloudFront distribution and ALB (this may take 10-15 minutes)...${NC}"
-
-    # Delete CloudFront first (takes longest)
-    if terraform state list | grep -q "aws_cloudfront_distribution"; then
-        echo "  • Deleting CloudFront distribution..."
-        terraform destroy -target=aws_cloudfront_distribution.frontend -auto-approve
-        echo -e "${GREEN}  ✓ CloudFront distribution deleted${NC}"
-    else
-        echo -e "${BLUE}  No CloudFront distribution found${NC}"
-    fi
+    # Step 2: Delete Application Load Balancer
+    echo -e "${YELLOW}[2/5] Deleting Application Load Balancer...${NC}"
 
     # Delete ALB and related resources
     if terraform state list | grep -q "aws_lb.frontend"; then
-        echo "  • Deleting Application Load Balancer..."
-        terraform destroy -target=aws_lb.frontend -target=aws_lb_listener.frontend_http -target=aws_lb_target_group.frontend -auto-approve 2>/dev/null || true
-        echo -e "${GREEN}  ✓ ALB deleted${NC}"
+        echo "  • Deleting Application Load Balancer and listeners..."
+        terraform destroy \
+            -target=aws_lb.frontend \
+            -target=aws_lb_listener.frontend_https \
+            -target=aws_lb_listener.frontend_http \
+            -target=aws_lb_target_group.frontend \
+            -target=aws_acm_certificate.alb_self_signed \
+            -auto-approve 2>/dev/null || true
+        echo -e "${GREEN}  ✓ ALB and HTTPS certificate deleted${NC}"
     else
         echo -e "${BLUE}  No ALB found${NC}"
     fi
@@ -324,11 +321,11 @@ except:
     }
 
     # Clean frontend ECR repository
-    FRONTEND_REPO="${PROJECT_NAME}-${ENVIRONMENT}-frontend"
+    FRONTEND_REPO="${PROJECT_NAME}-frontend-${ENVIRONMENT}"
     delete_ecr_images "$FRONTEND_REPO"
 
     # Clean processor ECR repository
-    PROCESSOR_REPO="${PROJECT_NAME}-processor"
+    PROCESSOR_REPO="${PROJECT_NAME}-processor-${ENVIRONMENT}"
     delete_ecr_images "$PROCESSOR_REPO"
 
     echo -e "${GREEN}✓${NC} ECR cleanup complete\n"
@@ -338,18 +335,16 @@ except:
 
     # List of IAM role patterns to delete
     IAM_ROLES=(
-        "${PROJECT_NAME}-ecs-task-execution"
-        "${PROJECT_NAME}-ecs-task"
-        "${PROJECT_NAME}-input-handler"
-        "${PROJECT_NAME}-mock-ecs"
-        "${PROJECT_NAME}-output-handler"
-        "${PROJECT_NAME}-s3-copy-processor"
-        "${PROJECT_NAME}-pre-auth-trigger-role"
-        "${PROJECT_NAME}-${ENVIRONMENT}-frontend-task-execution"
-        "${PROJECT_NAME}-${ENVIRONMENT}-frontend-task"
-        "${PROJECT_NAME}-${ENVIRONMENT}-cognito-authenticated"
-        "${PROJECT_NAME}-dev-frontend-task-execution"
-        "${PROJECT_NAME}-dev-frontend-task"
+        "${PROJECT_NAME}-ecs-task-execution-${ENVIRONMENT}"
+        "${PROJECT_NAME}-ecs-task-${ENVIRONMENT}"
+        "${PROJECT_NAME}-input-handler-${ENVIRONMENT}"
+        "${PROJECT_NAME}-mock-ecs-${ENVIRONMENT}"
+        "${PROJECT_NAME}-output-handler-${ENVIRONMENT}"
+        "${PROJECT_NAME}-s3-copy-processor-${ENVIRONMENT}"
+        "${PROJECT_NAME}-pre-auth-trigger-role-${ENVIRONMENT}"
+        "${PROJECT_NAME}-frontend-task-execution-${ENVIRONMENT}"
+        "${PROJECT_NAME}-frontend-task-${ENVIRONMENT}"
+        "${PROJECT_NAME}-cognito-authenticated-${ENVIRONMENT}"
     )
 
     ROLES_DELETED=0
@@ -394,8 +389,8 @@ except:
         echo ""
         echo "Common issues:"
         echo "  • S3 buckets not empty (re-run this script)"
-        echo "  • CloudFront distribution still deleting (wait and try again)"
         echo "  • VPC dependencies (check security groups, ENIs)"
+        echo "  • ALB still deleting (wait and try again)"
         echo "  • Waiting 60 seconds for ENIs to detach, then retrying..."
         sleep 60
         terraform destroy -auto-approve 2>/dev/null || true
@@ -405,12 +400,13 @@ except:
     echo -e "${YELLOW}[5/5] Cleaning up CloudWatch Log Groups...${NC}"
 
     LOG_GROUPS=(
-        "/ecs/${PROJECT_NAME}-${ENVIRONMENT}-frontend"
-        "/aws/lambda/${PROJECT_NAME}-input-handler"
-        "/aws/lambda/${PROJECT_NAME}-output-handler"
-        "/aws/lambda/${PROJECT_NAME}-mock-ecs"
-        "/aws/lambda/${PROJECT_NAME}-s3-copy-processor"
-        "/aws/lambda/${PROJECT_NAME}-pre-auth-trigger"
+        "/ecs/${PROJECT_NAME}-frontend-${ENVIRONMENT}"
+        "/ecs/${PROJECT_NAME}-processor-${ENVIRONMENT}"
+        "/aws/lambda/${PROJECT_NAME}-input-handler-${ENVIRONMENT}"
+        "/aws/lambda/${PROJECT_NAME}-output-handler-${ENVIRONMENT}"
+        "/aws/lambda/${PROJECT_NAME}-mock-ecs-${ENVIRONMENT}"
+        "/aws/lambda/${PROJECT_NAME}-s3-copy-processor-${ENVIRONMENT}"
+        "/aws/lambda/${PROJECT_NAME}-pre-auth-trigger-${ENVIRONMENT}"
     )
 
     LOGS_DELETED=0
@@ -438,8 +434,7 @@ except:
     echo -e "${BLUE}All infrastructure has been destroyed.${NC}"
     echo ""
     echo -e "${YELLOW}Cleanup Summary:${NC}"
-    echo "  • CloudFront distribution and policies (deleted in stage 2)"
-    echo "  • ALB, target groups, listeners (deleted in stage 2)"
+    echo "  • Application Load Balancer, listeners, HTTPS cert (deleted in stage 2)"
     echo "  • IAM roles and policies (deleted in stage 3.5)"
     echo "  • All remaining resources (deleted in stage 4)"
     echo "  • CloudWatch log groups (deleted in stage 5)"
@@ -464,7 +459,7 @@ echo ""
 echo -e "  ${GREEN}1)${NC} Data cleanup only (keep infrastructure running)"
 echo "     • Deletes all DynamoDB records"
 echo "     • Deletes all S3 files"
-echo "     • Keeps ECS, Lambda, CloudFront running"
+echo "     • Keeps ECS, Lambda, ALB running"
 echo ""
 echo -e "  ${RED}2)${NC} Full infrastructure teardown"
 echo "     • Destroys ALL AWS resources"

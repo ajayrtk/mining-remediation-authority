@@ -8,9 +8,9 @@ echo "=========================================="
 echo ""
 
 # Read configuration from terraform.tfvars
-PROJECT_NAME=$(grep -E '^\s*project_name\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/')
-ENVIRONMENT=$(grep -E '^\s*environment\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/')
-REGION=$(grep -E '^\s*aws_region\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/')
+PROJECT_NAME=$(grep -E '^\s*project_name\s*=' terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/')
+ENVIRONMENT=$(grep -E '^\s*environment\s*=' terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/')
+REGION=$(grep -E '^\s*aws_region\s*=' terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/')
 
 echo "Configuration:"
 echo "  Project: $PROJECT_NAME"
@@ -53,24 +53,24 @@ import_resource() {
 }
 
 echo "1. Importing ECR Repositories..."
-import_resource "aws_ecr_repository.processor" "${PROJECT_NAME}-processor" "ECR processor repository"
-import_resource "aws_ecr_repository.frontend" "${PROJECT_NAME}-${ENVIRONMENT}-frontend" "ECR frontend repository"
+import_resource "aws_ecr_repository.processor" "${PROJECT_NAME}-processor-${ENVIRONMENT}" "ECR processor repository"
+import_resource "aws_ecr_repository.frontend" "${PROJECT_NAME}-frontend-${ENVIRONMENT}" "ECR frontend repository"
 echo ""
 
 echo "2. Importing S3 Buckets..."
-INPUT_BUCKET_NAME=$(grep -E '^\s*map_input_bucket_name\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/')
-OUTPUT_BUCKET_NAME=$(grep -E '^\s*map_output_bucket_name\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/')
-import_resource "aws_s3_bucket.map_input" "${PROJECT_NAME}-${ENVIRONMENT}-${INPUT_BUCKET_NAME}" "S3 input bucket"
-import_resource "aws_s3_bucket.map_outputs" "${PROJECT_NAME}-${ENVIRONMENT}-${OUTPUT_BUCKET_NAME}" "S3 output bucket"
+INPUT_BUCKET_NAME=$(grep -E '^\s*map_input_bucket_name\s*=' terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/')
+OUTPUT_BUCKET_NAME=$(grep -E '^\s*map_output_bucket_name\s*=' terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/')
+import_resource "aws_s3_bucket.map_input" "${PROJECT_NAME}-${INPUT_BUCKET_NAME}-${ENVIRONMENT}" "S3 input bucket"
+import_resource "aws_s3_bucket.map_outputs" "${PROJECT_NAME}-${OUTPUT_BUCKET_NAME}-${ENVIRONMENT}" "S3 output bucket"
 echo ""
 
 echo "3. Importing DynamoDB Tables..."
-import_resource "aws_dynamodb_table.map_jobs" "${PROJECT_NAME}-${ENVIRONMENT}-maps-job" "DynamoDB jobs table"
-import_resource "aws_dynamodb_table.maps" "${PROJECT_NAME}-${ENVIRONMENT}-maps" "DynamoDB maps table"
+import_resource "aws_dynamodb_table.map_jobs" "${PROJECT_NAME}-maps-job-${ENVIRONMENT}" "DynamoDB jobs table"
+import_resource "aws_dynamodb_table.maps" "${PROJECT_NAME}-maps-${ENVIRONMENT}" "DynamoDB maps table"
 echo ""
 
 echo "4. Importing ECS Resources..."
-CLUSTER_NAME="${PROJECT_NAME}-cluster"
+CLUSTER_NAME="${PROJECT_NAME}-cluster-${ENVIRONMENT}"
 import_resource "aws_ecs_cluster.main" "$CLUSTER_NAME" "ECS cluster"
 
 # Get ECS service ARN if exists
@@ -82,7 +82,7 @@ echo ""
 
 echo "5. Importing Cognito Resources..."
 # Get Cognito User Pool ID
-COGNITO_POOL_NAME="${PROJECT_NAME}-${ENVIRONMENT}-users"
+COGNITO_POOL_NAME="${PROJECT_NAME}-users-pool-${ENVIRONMENT}"
 POOL_ID=$(aws cognito-idp list-user-pools --max-results 10 --region $REGION --query "UserPools[?Name=='$COGNITO_POOL_NAME'].Id" --output text 2>/dev/null)
 if [ -n "$POOL_ID" ]; then
     import_resource "aws_cognito_user_pool.users" "$POOL_ID" "Cognito user pool"
@@ -121,7 +121,7 @@ fi
 echo ""
 
 echo "7. Importing CloudFront Distribution..."
-CLOUDFRONT_COMMENT="${PROJECT_NAME}-${ENVIRONMENT}-frontend"
+CLOUDFRONT_COMMENT="${PROJECT_NAME}-frontend-${ENVIRONMENT}"
 DIST_ID=$(aws cloudfront list-distributions --region us-east-1 --query "DistributionList.Items[?Comment=='$CLOUDFRONT_COMMENT'].Id" --output text 2>/dev/null | head -1)
 if [ -n "$DIST_ID" ] && [ "$DIST_ID" != "None" ]; then
     import_resource "aws_cloudfront_distribution.frontend" "$DIST_ID" "CloudFront distribution"

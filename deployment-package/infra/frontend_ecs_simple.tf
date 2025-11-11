@@ -3,7 +3,7 @@
 
 # ECR Repository for Frontend Docker Image
 resource "aws_ecr_repository" "frontend" {
-  name                 = "${var.project_name}-${var.environment}-frontend"
+  name                 = "${var.project_name}-frontend-${var.environment}"
   image_tag_mutability = "MUTABLE"
   force_delete         = true  # Allow deletion even if images exist
 
@@ -16,7 +16,7 @@ resource "aws_ecr_repository" "frontend" {
 
 # Security Group for Frontend ECS Tasks (Direct Internet Access)
 resource "aws_security_group" "frontend_ecs" {
-  name        = "${var.project_name}-${var.environment}-frontend-sg"
+  name        = "${var.project_name}-frontend-sg-${var.environment}"
   description = "Security group for Frontend ECS tasks (direct access)"
   vpc_id      = aws_vpc.main.id
 
@@ -39,14 +39,14 @@ resource "aws_security_group" "frontend_ecs" {
   }
 
   tags = merge(local.tags, {
-    Name = "${var.project_name}-${var.environment}-frontend-sg"
+    Name = "${var.project_name}-frontend-sg-${var.environment}"
   })
 }
 
 # IAM Role for Frontend ECS Task Execution
 resource "aws_iam_role" "frontend_task_execution" {
   count = var.use_existing_iam_roles ? 0 : 1
-  name  = "${var.project_name}-${var.environment}-frontend-task-execution"
+  name  = "${var.project_name}-frontend-task-execution-${var.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -72,7 +72,7 @@ resource "aws_iam_role_policy_attachment" "frontend_task_execution" {
 # IAM Role for Frontend ECS Task (Application Permissions)
 resource "aws_iam_role" "frontend_task" {
   count = var.use_existing_iam_roles ? 0 : 1
-  name  = "${var.project_name}-${var.environment}-frontend-task"
+  name  = "${var.project_name}-frontend-task-${var.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -91,7 +91,7 @@ resource "aws_iam_role" "frontend_task" {
 # Policy for Frontend Task to access DynamoDB and S3
 resource "aws_iam_role_policy" "frontend_task_permissions" {
   count = var.use_existing_iam_roles ? 0 : 1
-  name  = "${var.project_name}-${var.environment}-frontend-permissions"
+  name  = "${var.project_name}-frontend-permissions-${var.environment}"
   role  = aws_iam_role.frontend_task[0].id
 
   policy = jsonencode({
@@ -144,7 +144,7 @@ resource "aws_iam_role_policy" "frontend_task_permissions" {
 
 # CloudWatch Log Group for Frontend
 resource "aws_cloudwatch_log_group" "frontend" {
-  name              = "/ecs/${var.project_name}-${var.environment}-frontend"
+  name              = "/ecs/${var.project_name}-frontend-${var.environment}"
   retention_in_days = 7
 
   tags = local.tags
@@ -152,7 +152,7 @@ resource "aws_cloudwatch_log_group" "frontend" {
 
 # ECS Task Definition for Frontend
 resource "aws_ecs_task_definition" "frontend" {
-  family                   = "${var.project_name}-${var.environment}-frontend"
+  family                   = "${var.project_name}-frontend-${var.environment}"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                      = "256"  # 0.25 vCPU (cheaper than 0.5)
@@ -243,10 +243,10 @@ resource "aws_ecs_task_definition" "frontend" {
         value = aws_s3_bucket.map_outputs.bucket
       },
       # SvelteKit ORIGIN - tells adapter-node the correct public URL
-      # This ensures url.origin returns CloudFront URL, not ALB DNS
+      # This ensures url.origin returns the correct ALB HTTPS URL
       {
         name  = "ORIGIN"
-        value = "https://${aws_cloudfront_distribution.frontend.domain_name}"
+        value = "https://${aws_lb.frontend.dns_name}"
       }
     ]
 
@@ -267,7 +267,7 @@ resource "aws_ecs_task_definition" "frontend" {
 
 # ECS Service for Frontend (With ALB Integration)
 resource "aws_ecs_service" "frontend" {
-  name            = "${var.project_name}-${var.environment}-frontend"
+  name            = "${var.project_name}-frontend-${var.environment}"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.frontend.arn
   desired_count   = 1
@@ -317,16 +317,17 @@ output "frontend_access_instructions" {
   Frontend Application Access
   ========================================
 
-  Application URL: https://${aws_cloudfront_distribution.frontend.domain_name}
+  Application URL: https://${aws_lb.frontend.dns_name}
 
   Architecture:
-  - CloudFront (HTTPS, global CDN) → ALB (stable) → ECS Tasks (auto-healing)
+  - ALB (HTTPS with self-signed cert) → ECS Tasks (auto-healing)
 
   Benefits:
   ✓ HTTPS enabled (Cognito authentication works)
-  ✓ Stable origin (no 504 errors on task restarts)
-  ✓ Global performance (CloudFront edge caching)
+  ✓ Self-signed certificate (suitable for internal/10-user deployment)
+  ✓ Stable load balancer (no 504 errors on task restarts)
   ✓ Auto-healing (ALB health checks)
+  ✓ Cost-optimized ($32-62/month vs $40-72/month with CloudFront)
 
   ALB DNS: ${aws_lb.frontend.dns_name}
 

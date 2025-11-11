@@ -8,7 +8,7 @@ data "archive_file" "input_handler" {
 }
 
 resource "aws_lambda_function" "input_handler" {
-	function_name = "${var.project_name}-input-handler"
+	function_name = "${var.project_name}-input-handler-${var.environment}"
 	runtime       = "python3.11"
 	handler       = "handler.lambda_handler"
 	role          = local.input_handler_role_arn
@@ -47,7 +47,7 @@ data "archive_file" "mock_ecs" {
 }
 
 resource "aws_lambda_function" "mock_ecs" {
-	function_name = "${var.project_name}-mock-ecs"
+	function_name = "${var.project_name}-mock-ecs-${var.environment}"
 	runtime       = "python3.11"
 	handler       = "handler.lambda_handler"
 	role          = local.mock_ecs_role_arn
@@ -71,7 +71,7 @@ data "archive_file" "output_handler" {
 }
 
 resource "aws_lambda_function" "output_handler" {
-	function_name = "${var.project_name}-output-handler"
+	function_name = "${var.project_name}-output-handler-${var.environment}"
 	runtime       = "python3.11"
 	handler       = "handler.lambda_handler"
 	role          = local.output_handler_role_arn
@@ -103,7 +103,7 @@ data "archive_file" "s3_copy_processor" {
 }
 
 resource "aws_lambda_function" "s3_copy_processor" {
-	function_name = "${var.project_name}-s3-copy-processor"
+	function_name = "${var.project_name}-s3-copy-processor-${var.environment}"
 	runtime       = "python3.11"
 	handler       = "handler.lambda_handler"
 	role          = local.s3_copy_processor_role_arn
