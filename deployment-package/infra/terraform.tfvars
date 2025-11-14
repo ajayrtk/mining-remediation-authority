@@ -1,24 +1,21 @@
-# Terraform Variables Configuration
-# This file is the CENTRALIZED configuration for the deployment
+# Main configuration file for MRA Mines deployment
 
-# ===== CORE SETTINGS (Change these for different environments) =====
+# Basic settings - change these for different environments
 project_name = "mra-mines"
-environment  = "dev"          # Options: "dev", "staging", "prod"
-aws_region   = "eu-west-2"    # AWS region for deployment
+environment  = "staging"       # dev, staging, or prod
+aws_region   = "eu-west-2"
 
-# ===== S3 BUCKET NAMES =====
-# Use unique names to avoid conflicts with existing buckets
+# S3 bucket names - must be globally unique
 map_input_bucket_name  = "map-input"
 map_output_bucket_name = "map-output"
 
-# ===== IAM ROLES CONFIGURATION =====
-# Use existing IAM roles instead of creating new ones
+# IAM role configuration
+# Set to true if roles already exist in AWS (avoids conflicts)
 use_existing_iam_roles = false
 
-# Names of existing IAM roles in AWS account (only used if use_existing_iam_roles = true)
+# Only used when use_existing_iam_roles = true
 existing_iam_role_names = {
   input_handler           = "mra-mines-input-handler"
-  mock_ecs               = "mra-mines-mock-ecs"
   output_handler         = "mra-mines-output-handler"
   s3_copy_processor      = "mra-mines-s3-copy-processor"
   ecs_task_execution     = "mra-mines-ecs-task-execution"
@@ -28,8 +25,13 @@ existing_iam_role_names = {
   pre_auth_trigger       = "mra-mines-pre-auth-trigger-role"
 }
 
-# ===== ADMIN USER CONFIGURATION =====
-# Default admin user credentials (change after first login!)
+# Default admin user - CHANGE PASSWORD after first login!
 admin_email    = "ajay.rawat@stfc.ac.uk"
 admin_username = "ajay"
 admin_password = "Ajay@1234"
+
+# Custom domain configuration
+# Set enable_custom_domain = true to use Route 53 and ACM for custom domain
+# Important: You must own the domain and update name servers after deployment
+domain_name          = "mine-maps.com"
+enable_custom_domain = true

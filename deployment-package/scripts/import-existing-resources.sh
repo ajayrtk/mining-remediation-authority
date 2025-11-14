@@ -1,21 +1,18 @@
 #!/bin/bash
-# Import existing AWS resources into Terraform state
-# This allows Terraform to manage resources that were created outside of Terraform
+# Imports existing AWS resources into Terraform state
 
 set -e
 
-# Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 echo -e "${BLUE}================================================${NC}"
 echo -e "${BLUE}   Import Existing Resources into Terraform${NC}"
 echo -e "${BLUE}================================================${NC}\n"
 
-# Check if we're in the right directory
 if [ ! -f "infra/terraform.tfvars" ]; then
     echo -e "${RED}ERROR: infra/terraform.tfvars not found${NC}"
     echo "Please run this script from the deployment-package directory"
@@ -25,14 +22,12 @@ fi
 
 cd infra
 
-# Initialize Terraform if not already done
 if [ ! -d ".terraform" ]; then
     echo -e "${YELLOW}Initializing Terraform...${NC}"
     terraform init
     echo ""
 fi
 
-# Read project name and environment from terraform.tfvars
 PROJECT_NAME=$(grep -E '^\s*project_name\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/' || echo "mra-mines")
 ENVIRONMENT=$(grep -E '^\s*environment\s*=' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/' || echo "staging")
 

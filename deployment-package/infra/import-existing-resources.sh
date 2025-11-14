@@ -1,13 +1,13 @@
 #!/bin/bash
-# Import all existing AWS resources into Terraform state
-set +e  # Don't exit on errors
+# Imports existing AWS resources into Terraform state
+
+set +e
 
 echo "=========================================="
 echo "  Importing Existing AWS Resources"
 echo "=========================================="
 echo ""
 
-# Read configuration from terraform.tfvars
 PROJECT_NAME=$(grep -E '^\s*project_name\s*=' terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/')
 ENVIRONMENT=$(grep -E '^\s*environment\s*=' terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/')
 REGION=$(grep -E '^\s*aws_region\s*=' terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/')
@@ -18,13 +18,11 @@ echo "  Environment: $ENVIRONMENT"
 echo "  Region: $REGION"
 echo ""
 
-# Colors
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# Track results
 SUCCESS=0
 FAILED=0
 SKIPPED=0

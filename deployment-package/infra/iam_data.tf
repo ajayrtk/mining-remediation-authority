@@ -1,14 +1,7 @@
-# --- IAM Role Data Sources for Existing Roles ---
-
-# Data sources to look up existing IAM roles
+# Data sources for looking up existing IAM roles when use_existing_iam_roles = true
 data "aws_iam_role" "existing_input_handler" {
 	count = var.use_existing_iam_roles && var.existing_iam_role_names.input_handler != null ? 1 : 0
 	name  = var.existing_iam_role_names.input_handler
-}
-
-data "aws_iam_role" "existing_mock_ecs" {
-	count = var.use_existing_iam_roles && var.existing_iam_role_names.mock_ecs != null ? 1 : 0
-	name  = var.existing_iam_role_names.mock_ecs
 }
 
 data "aws_iam_role" "existing_output_handler" {
@@ -50,9 +43,6 @@ data "aws_iam_role" "existing_pre_auth_trigger" {
 locals {
 	input_handler_role_arn = var.use_existing_iam_roles && var.existing_iam_role_names.input_handler != null ? data.aws_iam_role.existing_input_handler[0].arn : (length(aws_iam_role.input_handler) > 0 ? aws_iam_role.input_handler[0].arn : null)
 	input_handler_role_id  = var.use_existing_iam_roles && var.existing_iam_role_names.input_handler != null ? data.aws_iam_role.existing_input_handler[0].id : (length(aws_iam_role.input_handler) > 0 ? aws_iam_role.input_handler[0].id : null)
-
-	mock_ecs_role_arn = var.use_existing_iam_roles && var.existing_iam_role_names.mock_ecs != null ? data.aws_iam_role.existing_mock_ecs[0].arn : (length(aws_iam_role.mock_ecs) > 0 ? aws_iam_role.mock_ecs[0].arn : null)
-	mock_ecs_role_id  = var.use_existing_iam_roles && var.existing_iam_role_names.mock_ecs != null ? data.aws_iam_role.existing_mock_ecs[0].id : (length(aws_iam_role.mock_ecs) > 0 ? aws_iam_role.mock_ecs[0].id : null)
 
 	output_handler_role_arn = var.use_existing_iam_roles && var.existing_iam_role_names.output_handler != null ? data.aws_iam_role.existing_output_handler[0].arn : (length(aws_iam_role.output_handler) > 0 ? aws_iam_role.output_handler[0].arn : null)
 	output_handler_role_id  = var.use_existing_iam_roles && var.existing_iam_role_names.output_handler != null ? data.aws_iam_role.existing_output_handler[0].id : (length(aws_iam_role.output_handler) > 0 ? aws_iam_role.output_handler[0].id : null)

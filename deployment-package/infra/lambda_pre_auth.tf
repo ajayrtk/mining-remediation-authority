@@ -1,6 +1,6 @@
-# --- Pre-Authentication Lambda Trigger ---
+# Pre-authentication Lambda trigger for Cognito - validates user email domain
 
-# Archive Lambda function code
+# Package Lambda function code
 data "archive_file" "pre_auth_trigger" {
 	type        = "zip"
 	source_dir  = "${path.module}/lambda/pre_auth_trigger"

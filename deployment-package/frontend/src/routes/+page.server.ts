@@ -1,7 +1,4 @@
-/**
- * Server-side data loader for the main dashboard page
- * Fetches recent jobs and their associated map names
- */
+// Dashboard data loader - fetches recent jobs and map names
 
 import { ScanCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { MAP_JOBS_TABLE, MAPS_TABLE, dynamoDocClient } from '$lib/server/dynamo';

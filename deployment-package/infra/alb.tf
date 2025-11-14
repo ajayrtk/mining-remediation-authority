@@ -1,10 +1,6 @@
-# =====================================================
-# Application Load Balancer for Frontend
-# =====================================================
-# ALB provides direct user access with HTTPS
-# Browser → ALB (HTTPS) → ECS Tasks
+# Application Load Balancer - handles incoming HTTPS traffic and routes to ECS tasks
 
-# Security Group for ALB
+# Security group for the ALB
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg-${var.environment}"
   description = "Security group for Application Load Balancer"
@@ -105,14 +101,18 @@ resource "aws_lb_target_group" "frontend" {
   }
 }
 
-# Create self-signed certificate for HTTPS
+# Self-signed certificate for HTTPS (used when custom domain is NOT enabled)
 resource "tls_private_key" "alb" {
+  count = var.enable_custom_domain ? 0 : 1
+
   algorithm = "RSA"
   rsa_bits  = 2048
 }
 
 resource "tls_self_signed_cert" "alb" {
-  private_key_pem = tls_private_key.alb.private_key_pem
+  count = var.enable_custom_domain ? 0 : 1
+
+  private_key_pem = tls_private_key.alb[0].private_key_pem
 
   subject {
     common_name  = "${var.project_name}-${var.environment}.local"
@@ -129,8 +129,10 @@ resource "tls_self_signed_cert" "alb" {
 }
 
 resource "aws_acm_certificate" "alb_self_signed" {
-  private_key      = tls_private_key.alb.private_key_pem
-  certificate_body = tls_self_signed_cert.alb.cert_pem
+  count = var.enable_custom_domain ? 0 : 1
+
+  private_key      = tls_private_key.alb[0].private_key_pem
+  certificate_body = tls_self_signed_cert.alb[0].cert_pem
 
   tags = {
     Name        = "${var.project_name}-alb-cert-${var.environment}"
@@ -145,12 +147,13 @@ resource "aws_acm_certificate" "alb_self_signed" {
 }
 
 # ALB Listener - HTTPS on port 443 (primary)
+# Uses ACM certificate when custom domain is enabled, otherwise uses self-signed certificate
 resource "aws_lb_listener" "frontend_https" {
   load_balancer_arn = aws_lb.frontend.arn
   port              = "443"
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate.alb_self_signed.arn
+  certificate_arn   = var.enable_custom_domain ? aws_acm_certificate.main[0].arn : aws_acm_certificate.alb_self_signed[0].arn
 
   default_action {
     type             = "forward"

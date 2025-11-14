@@ -1,6 +1,6 @@
-# --- DynamoDB Tables ---
+# DynamoDB tables for storing map metadata and job status
 
-# MAPS table - Stores map metadata with composite key (mapId + mapName)
+# Maps table - stores metadata for each uploaded map file
 resource "aws_dynamodb_table" "maps" {
 	name         = "${var.project_name}-${var.maps_table_name}-${var.environment}"
 	hash_key     = "mapId"
@@ -64,7 +64,7 @@ resource "aws_dynamodb_table" "maps" {
 	tags = local.tags
 }
 
-# MAPJOBS table - Stores job processing attempts (one job can process multiple maps)
+# Jobs table - tracks processing jobs (one job can process multiple maps)
 resource "aws_dynamodb_table" "map_jobs" {
 	name         = "${var.project_name}-${var.map_jobs_table_name}-${var.environment}"
 	hash_key     = "jobId"

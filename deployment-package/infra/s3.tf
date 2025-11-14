@@ -1,6 +1,6 @@
-# --- S3 Buckets ---
+# S3 buckets for map file storage
 
-# Input bucket for uploaded ZIP files
+# Input bucket - receives uploaded ZIP files from users
 resource "aws_s3_bucket" "map_input" {
 	bucket        = "${var.project_name}-${var.map_input_bucket_name}-${var.environment}"
 	force_destroy = true
@@ -31,7 +31,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "map_input" {
 		id     = "delete-after-5-days"
 		status = "Enabled"
 
-		# Apply to all objects
 		filter {}
 
 		expiration {
@@ -81,8 +80,7 @@ resource "aws_s3_bucket_public_access_block" "map_outputs" {
 	restrict_public_buckets = true
 }
 
-# --- S3 Event Notifications ---
-
+# S3 notifications trigger Lambda functions when files are uploaded
 resource "aws_s3_bucket_notification" "map_input" {
 	bucket = aws_s3_bucket.map_input.id
 

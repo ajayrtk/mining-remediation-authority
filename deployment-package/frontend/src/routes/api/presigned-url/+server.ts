@@ -1,6 +1,5 @@
-// Presigned URL API for S3 uploads
-// This handles file upload requests, checks for duplicates, and implements retry logic
-// for failed uploads. Uses hash-based deduplication to prevent duplicate processing.
+// Presigned URL API - generates signed URLs for direct S3 uploads
+// Checks for duplicates and handles retry logic for failed uploads
 
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -10,42 +9,29 @@ import { MAPS_TABLE, dynamoDocClient } from '$lib/server/dynamo';
 import { MAP_INPUT_BUCKET, getS3Client } from '$lib/server/s3';
 import type { RequestHandler } from './$types';
 
-// ZIP file MIME types we accept - browsers can send different ones
 const ALLOWED_MIME = new Set([
 	'application/zip',
 	'application/x-zip-compressed',
 	'multipart/x-zip',
-	'application/octet-stream' // Some browsers use this for ZIP
+	'application/octet-stream'
 ]);
 
-// Sanitize filenames to standard format: SeamID_SheetNumber.zip
-// We need this because users upload files with extra text like:
-// "17836_26_9285_UpperHirst.zip" -> "17836_269285.zip"
-// "D723_43_3857_extra.zip" -> "D723_433857.zip"
-// This keeps storage clean and consistent
+// Sanitize to standard format: SeamID_SheetNumber.zip
+// Example: "17836_26_9285_UpperHirst.zip" -> "17836_269285.zip"
 const sanitizeName = (name: string) => {
-	// First, grab the file extension
 	const extMatch = name.match(/\.(zip|ZIP)$/i);
 	const ext = extMatch ? extMatch[0] : '.zip';
-
-	// Remove the extension so we can work with just the name part
 	const nameWithoutExt = name.replace(/\.(zip|ZIP)$/i, '');
 
-	// Split on underscores to find SeamID and sheet number
 	const parts = nameWithoutExt.split('_');
 	if (parts.length === 0) {
-		return name; // Can't parse, just return original
+		return name;
 	}
 
-	// SeamID is everything before the first underscore
 	const seamId = parts[0];
-
-	// Sheet number is 6 digits, but might be split like "26_9285"
-	// So we extract all digits after the seamId and take first 6
 	const remainingParts = parts.slice(1).join('');
-	const digits = remainingParts.replace(/\D/g, ''); // Remove non-digits
+	const digits = remainingParts.replace(/\D/g, '');
 
-	// If we found at least 6 digits, use them as the sheet number
 	if (digits.length >= 6) {
 		const sheetNumber = digits.substring(0, 6);
 		return `${seamId}_${sheetNumber}${ext}`;

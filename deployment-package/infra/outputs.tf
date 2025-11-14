@@ -60,11 +60,6 @@ output "input_handler_lambda_arn" {
 	description = "ARN of the Lambda function triggered by uploads into map-input"
 }
 
-output "mock_ecs_lambda_arn" {
-	value       = aws_lambda_function.mock_ecs.arn
-	description = "ARN of the Lambda function that simulates ECS processing"
-}
-
 output "output_handler_lambda_arn" {
 	value       = aws_lambda_function.output_handler.arn
 	description = "ARN of the Lambda function triggered by processed artifacts"
@@ -95,12 +90,9 @@ output "public_subnet_ids" {
 	description = "Public subnet IDs for ECS tasks"
 }
 
-# ======================
-# Application Access URL
-# ======================
-
+# Main application URL
 output "application_url" {
-	value       = "https://${aws_lb.frontend.dns_name}"
+	value       = var.enable_custom_domain ? "https://www.${var.domain_name}" : "https://${aws_lb.frontend.dns_name}"
 	description = "⭐ Main application URL (HTTPS) - Use this to access the application"
 }
 
@@ -112,4 +104,55 @@ output "project_name" {
 output "environment" {
 	value       = var.environment
 	description = "Environment name used in resource naming"
+}
+
+# Custom Domain Outputs (only when custom domain is enabled)
+output "custom_domain_enabled" {
+	value       = var.enable_custom_domain
+	description = "Whether custom domain is enabled"
+}
+
+output "route53_name_servers" {
+	value       = var.enable_custom_domain ? aws_route53_zone.main[0].name_servers : []
+	description = "Route 53 name servers - Update these at your domain registrar"
+}
+
+output "custom_domain_url" {
+	value       = var.enable_custom_domain ? "https://www.${var.domain_name}" : "Custom domain not enabled"
+	description = "Custom domain URL (when enabled)"
+}
+
+output "acm_certificate_arn" {
+	value       = var.enable_custom_domain ? aws_acm_certificate.main[0].arn : "Custom domain not enabled"
+	description = "ACM certificate ARN (when custom domain is enabled)"
+}
+
+output "custom_domain_setup_instructions" {
+	value = var.enable_custom_domain ? join("\n", [
+		"",
+		"========================================",
+		"Custom Domain Setup Instructions",
+		"========================================",
+		"",
+		"1. Update Name Servers at Domain Registrar:",
+		"   Go to your domain registrar (e.g., GoDaddy, Namecheap, Route 53)",
+		"   Update the name servers for ${var.domain_name} to:",
+		join("\n   ", aws_route53_zone.main[0].name_servers),
+		"",
+		"2. Wait for DNS Propagation (5 minutes - 48 hours)",
+		"   Check status: dig ${var.domain_name} NS",
+		"",
+		"3. Wait for ACM Certificate Validation (5-15 minutes)",
+		"   Certificate is automatically validated via DNS records",
+		"",
+		"4. Access Your Application:",
+		"   https://www.${var.domain_name}",
+		"   https://${var.domain_name}",
+		"",
+		"Note: ALB URL still works during transition:",
+		"https://${aws_lb.frontend.dns_name}",
+		"",
+		"========================================"
+	]) : "Custom domain not enabled. Set enable_custom_domain = true in terraform.tfvars"
+	description = "Step-by-step instructions for completing custom domain setup"
 }

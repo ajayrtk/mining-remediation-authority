@@ -1,7 +1,6 @@
-# --- Frontend ECS Infrastructure (Without Load Balancer) ---
-# Simple deployment using public IP directly
+# Frontend ECS service - runs the SvelteKit web application
 
-# ECR Repository for Frontend Docker Image
+# ECR repository for frontend Docker images
 resource "aws_ecr_repository" "frontend" {
   name                 = "${var.project_name}-frontend-${var.environment}"
   image_tag_mutability = "MUTABLE"
@@ -14,10 +13,10 @@ resource "aws_ecr_repository" "frontend" {
   tags = local.tags
 }
 
-# Security Group for Frontend ECS Tasks (Direct Internet Access)
+# Security group for frontend ECS tasks (receives traffic from ALB)
 resource "aws_security_group" "frontend_ecs" {
   name        = "${var.project_name}-frontend-sg-${var.environment}"
-  description = "Security group for Frontend ECS tasks (direct access)"
+  description = "Security group for Frontend ECS tasks"
   vpc_id      = aws_vpc.main.id
 
   # Allow HTTP from anywhere
@@ -242,12 +241,13 @@ resource "aws_ecs_task_definition" "frontend" {
         name  = "MAP_OUTPUT_BUCKET"
         value = aws_s3_bucket.map_outputs.bucket
       },
-      # SvelteKit ORIGIN - tells adapter-node the correct public URL
-      # This ensures url.origin returns the correct ALB HTTPS URL
-      {
-        name  = "ORIGIN"
-        value = "https://${aws_lb.frontend.dns_name}"
-      }
+      # SvelteKit ORIGIN - removed to allow multiple domains
+      # When ORIGIN is not set, SvelteKit auto-detects from Host header
+      # This allows both mine-maps.com and www.mine-maps.com to work
+      # {
+      #   name  = "ORIGIN"
+      #   value = var.enable_custom_domain ? "https://www.${var.domain_name}" : "https://${aws_lb.frontend.dns_name}"
+      # }
     ]
 
     logConfiguration = {

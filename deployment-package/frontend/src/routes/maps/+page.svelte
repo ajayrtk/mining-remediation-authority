@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { invalidateAll } from '$app/navigation';
 	import type { PageData } from './$types';
 	import type { MapEntry } from './+page.server';
@@ -271,7 +270,7 @@
 	{#if !user}
 		<section class="panel sign-in-panel">
 			<h3>Sign in to continue</h3>
-			<p>Use Cognito to view the registry.</p>
+			<p>Sign in with your account to view processed maps.</p>
 			<a class="button primary" href="/auth/login">Sign in</a>
 		</section>
 	{:else}
@@ -493,18 +492,6 @@
 		align-items: center;
 		gap: 0.75rem;
 		flex-wrap: wrap;
-	}
-
-	.user-chip {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.45rem;
-		padding: 0.4rem 0.85rem;
-		border-radius: 999px;
-		background: var(--chip-bg);
-		color: var(--chip-text);
-		font-size: 0.9rem;
-		font-weight: 500;
 	}
 
 	/* User Menu Styles */
@@ -829,26 +816,9 @@
 		background: var(--table-hover-bg);
 	}
 
-	code {
-		font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-		font-size: 0.8rem;
-		padding: 0.2rem 0.4rem;
-		border-radius: 0.3rem;
-		background: var(--background-surface-muted);
-		color: var(--text-secondary);
-	}
-
 	.map-name {
 		color: #7c3aed;
 		font-weight: 600;
-	}
-
-	.map-id {
-		color: #2563eb;
-	}
-
-	.job-id {
-		color: #10b981;
 	}
 
 	.meta {

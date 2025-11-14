@@ -1,24 +1,20 @@
 #!/bin/bash
-# MRA Mines Map - Setup Script
-# This script checks prerequisites and prepares the environment for deployment
+# Setup script - checks prerequisites and prepares environment
 
 set -e
 
-# Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 echo -e "${BLUE}============================================${NC}"
 echo -e "${BLUE}MRA Mines Map - Setup & Prerequisites Check${NC}"
 echo -e "${BLUE}============================================${NC}\n"
 
-# Track if all checks pass
 ALL_CHECKS_PASSED=true
 
-# Function to check if a command exists
 check_command() {
     local cmd=$1
     local name=$2
@@ -38,24 +34,14 @@ check_command() {
 
 echo -e "${YELLOW}1. Checking required tools...${NC}\n"
 
-# Check AWS CLI
 check_command "aws" "AWS CLI" "https://aws.amazon.com/cli/"
-
-# Check Terraform
 check_command "terraform" "Terraform" "https://www.terraform.io/downloads"
-
-# Check Docker
 check_command "docker" "Docker" "https://docs.docker.com/get-docker/"
-
-# Check Node.js
 check_command "node" "Node.js" "https://nodejs.org/"
-
-# Check npm
 check_command "npm" "npm" "https://www.npmjs.com/get-npm"
 
 echo ""
 
-# Check AWS credentials
 echo -e "${YELLOW}2. Checking AWS credentials...${NC}\n"
 
 if aws sts get-caller-identity &> /dev/null; then

@@ -1,21 +1,17 @@
 #!/bin/bash
-
-# Script to build and push frontend Docker image to ECR
+# Builds and pushes frontend Docker image to ECR
 
 set -e
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 echo -e "${GREEN}=== Frontend Docker Build and Push ===${NC}"
 
-# Get AWS account ID and region
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-# Get region from Terraform output (with fallback to AWS CLI default)
 cd ../infra
 TERRAFORM_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "")
 if [ -z "$TERRAFORM_REGION" ]; then
@@ -26,7 +22,6 @@ fi
 
 echo -e "${YELLOW}Using AWS Region: ${AWS_REGION}${NC}"
 
-# Get ECR repository URL from Terraform output
 ECR_REPO=$(terraform output -raw frontend_ecr_repository_url 2>/dev/null || true)
 
 if [ -z "$ECR_REPO" ]; then
@@ -37,7 +32,6 @@ fi
 
 echo -e "${GREEN}ECR Repository: ${ECR_REPO}${NC}"
 
-# Login to ECR
 echo -e "${YELLOW}Logging in to ECR...${NC}"
 aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
 

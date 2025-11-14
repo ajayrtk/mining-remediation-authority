@@ -1,21 +1,18 @@
 #!/bin/bash
-# MRA Mines Map - Deployment Script
-# This script automates the complete deployment process
+# Deployment script - automates the complete deployment process
 
 set -e
 
-# Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 echo -e "${BLUE}================================================${NC}"
 echo -e "${BLUE}   MRA Mines Map - Production Deployment${NC}"
 echo -e "${BLUE}================================================${NC}\n"
 
-# Check if we're in the right directory
 if [ ! -f "infra/terraform.tfvars" ]; then
     echo -e "${RED}ERROR: infra/terraform.tfvars not found${NC}"
     echo "Please run this script from the deployment-package directory"
@@ -23,10 +20,8 @@ if [ ! -f "infra/terraform.tfvars" ]; then
     exit 1
 fi
 
-# Get deployment information
 echo -e "${YELLOW}Deployment Information:${NC}"
 AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-# Get configuration from terraform.tfvars
 AWS_REGION=$(grep -E '^\s*aws_region\s*=' infra/terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' || echo "eu-central-1")
 PROJECT_NAME=$(grep -E '^\s*project_name\s*=' infra/terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' || echo "mra-mines")
 ENVIRONMENT=$(grep -E '^\s*environment\s*=' infra/terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' || echo "staging")
@@ -139,7 +134,7 @@ cd ecs_processor
 
 # Login to ECR
 echo "  • Logging in to ECR..."
-aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com
 
 # Build Docker image
 echo "  • Building Docker image for linux/amd64 platform..."

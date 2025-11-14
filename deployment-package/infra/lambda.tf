@@ -1,6 +1,6 @@
-# --- Lambda Functions ---
+# Lambda functions handle file uploads and processing workflow
 
-# Input Handler Lambda
+# Input handler - triggered when a ZIP file is uploaded to the input bucket
 data "archive_file" "input_handler" {
 	type        = "zip"
 	source_dir  = "${path.module}/lambda/input_handler"
@@ -19,7 +19,6 @@ resource "aws_lambda_function" "input_handler" {
 		variables = {
 			JOBS_TABLE_NAME = aws_dynamodb_table.map_jobs.name
 			MAPS_TABLE_NAME = aws_dynamodb_table.maps.name
-			MOCK_ECS_FUNCTION_NAME = aws_lambda_function.mock_ecs.function_name
 			S3_COPY_FUNCTION_NAME = aws_lambda_function.s3_copy_processor.function_name
 			ECS_CLUSTER = aws_ecs_cluster.main.name
 			ECS_TASK_DEFINITION = aws_ecs_task_definition.processor.family
@@ -39,31 +38,7 @@ resource "aws_lambda_permission" "allow_input_bucket" {
 	source_arn    = aws_s3_bucket.map_input.arn
 }
 
-# Mock ECS Lambda
-data "archive_file" "mock_ecs" {
-	type        = "zip"
-	source_dir  = "${path.module}/lambda/mock_ecs_job"
-	output_path = "${path.module}/build/mock_ecs_job.zip"
-}
-
-resource "aws_lambda_function" "mock_ecs" {
-	function_name = "${var.project_name}-mock-ecs-${var.environment}"
-	runtime       = "python3.11"
-	handler       = "handler.lambda_handler"
-	role          = local.mock_ecs_role_arn
-	source_code_hash = data.archive_file.mock_ecs.output_base64sha256
-	filename         = data.archive_file.mock_ecs.output_path
-	environment {
-		variables = {
-			JOBS_TABLE_NAME  = aws_dynamodb_table.map_jobs.name
-			OUTPUT_BUCKET    = aws_s3_bucket.map_outputs.bucket
-			PROJECT_NAME     = var.project_name
-		}
-	}
-	tags = local.tags
-}
-
-# Output Handler Lambda
+# Output handler - triggered when processed files appear in the output bucket
 data "archive_file" "output_handler" {
 	type        = "zip"
 	source_dir  = "${path.module}/lambda/output_handler"
@@ -95,7 +70,7 @@ resource "aws_lambda_permission" "allow_output_bucket" {
 	source_arn    = aws_s3_bucket.map_outputs.arn
 }
 
-# S3 Copy Processor Lambda
+# S3 copy processor - handles copying files between buckets during processing
 data "archive_file" "s3_copy_processor" {
 	type        = "zip"
 	source_dir  = "${path.module}/lambda/s3_copy_processor"

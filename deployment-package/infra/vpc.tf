@@ -1,6 +1,4 @@
-# --- VPC and Networking for ECS ---
-
-# VPC
+# VPC and networking setup
 resource "aws_vpc" "main" {
 	cidr_block           = "10.0.0.0/16"
 	enable_dns_hostnames = true
@@ -11,7 +9,7 @@ resource "aws_vpc" "main" {
 	})
 }
 
-# Internet Gateway
+# Internet gateway for public access
 resource "aws_internet_gateway" "main" {
 	vpc_id = aws_vpc.main.id
 

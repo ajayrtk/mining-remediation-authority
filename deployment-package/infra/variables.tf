@@ -13,7 +13,7 @@ variable "project_name" {
 variable "environment" {
 	type        = string
 	description = "Environment name (dev, staging, prod)"
-	default     = "dev"
+	default     = "staging"
 
 	validation {
 		condition     = contains(["dev", "staging", "prod"], var.environment)
@@ -63,15 +63,12 @@ variable "cognito_domain_prefix" {
 	default     = ""
 }
 
-# NOTE: Cognito callback URLs are now hardcoded in cognito.tf to use ALB DNS
-# These variables were removed after CloudFront removal (no longer needed)
-# Cognito is now configured directly in cognito.tf with:
-#   - http://localhost:5173/auth/callback (for local dev)
-#   - https://${aws_lb.frontend.dns_name}/auth/callback (for production)
+# Cognito callback URLs are set in cognito.tf to use the ALB DNS
+# No variables needed - it uses the load balancer URL directly
 
 variable "frontend_origin_domain" {
 	type        = string
-	description = "CloudFront origin domain (ECS task public DNS)"
+	description = "Not used - kept for backward compatibility"
 	default     = ""
 }
 
@@ -84,7 +81,6 @@ variable "use_existing_iam_roles" {
 variable "existing_iam_role_names" {
 	type = object({
 		input_handler           = optional(string)
-		mock_ecs               = optional(string)
 		output_handler         = optional(string)
 		s3_copy_processor      = optional(string)
 		ecs_task_execution     = optional(string)
@@ -96,7 +92,6 @@ variable "existing_iam_role_names" {
 	description = "Names of existing IAM roles to use when use_existing_iam_roles is true"
 	default = {
 		input_handler           = null
-		mock_ecs               = null
 		output_handler         = null
 		s3_copy_processor      = null
 		ecs_task_execution     = null
@@ -124,4 +119,16 @@ variable "admin_password" {
 	description = "Password for the default admin user (used by deploy script, change after first login!)"
 	sensitive   = true
 	default     = "ChangeMe123!"
+}
+
+variable "domain_name" {
+	type        = string
+	description = "Custom domain name for the application (e.g., mine-maps.com)"
+	default     = ""
+}
+
+variable "enable_custom_domain" {
+	type        = bool
+	description = "Enable custom domain setup with Route 53 and ACM certificate"
+	default     = false
 }

@@ -1,10 +1,8 @@
 #!/bin/bash
-# Quick script to delete conflicting IAM roles
-# Run this before deploying with use_existing_iam_roles = false
+# Deletes IAM roles - run before deploying with use_existing_iam_roles = false
 
 set -e
 
-# Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
@@ -12,7 +10,6 @@ NC='\033[0m'
 
 echo -e "${YELLOW}Deleting conflicting IAM roles...${NC}\n"
 
-# Get project name and environment from terraform.tfvars
 if [ -f "infra/terraform.tfvars" ]; then
     PROJECT_NAME=$(grep -E '^\s*project_name\s*=' infra/terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' 2>/dev/null || echo "mra-mines")
     ENVIRONMENT=$(grep -E '^\s*environment\s*=' infra/terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' 2>/dev/null || echo "staging")
@@ -25,7 +22,6 @@ fi
 echo -e "${YELLOW}Project: ${PROJECT_NAME}${NC}"
 echo -e "${YELLOW}Environment: ${ENVIRONMENT}${NC}\n"
 
-# List of IAM roles to delete (with environment suffix)
 ROLES=(
     "${PROJECT_NAME}-ecs-task-execution-${ENVIRONMENT}"
     "${PROJECT_NAME}-ecs-task-${ENVIRONMENT}"

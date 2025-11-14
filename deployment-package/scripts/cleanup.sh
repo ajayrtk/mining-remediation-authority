@@ -1,17 +1,14 @@
 #!/bin/bash
-# MRA Mines Map - Cleanup Script
-# Options: Clean data only OR destroy all infrastructure
+# Cleanup script - clean data only OR destroy all infrastructure
 
 set -e
 
-# Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Function to clean data only (keep infrastructure running)
 cleanup_data_only() {
     echo -e "${BLUE}================================================${NC}"
     echo -e "${BLUE}   Data Cleanup (Infrastructure Preserved)${NC}"
@@ -26,7 +23,6 @@ cleanup_data_only() {
     echo "  • All AWS infrastructure"
     echo ""
 
-    # Get AWS region from Terraform output
     if [ -d "infra" ]; then
         cd infra
         TERRAFORM_REGION=$(terraform output -raw aws_region 2>/dev/null || echo "")
@@ -38,7 +34,6 @@ cleanup_data_only() {
         fi
         cd ..
     else
-        # Fallback: try to read from terraform.tfvars or AWS CLI config
         if [ -f "infra/terraform.tfvars" ]; then
             AWS_REGION=$(grep -E '^\s*aws_region\s*=' infra/terraform.tfvars | sed 's/#.*//' | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' 2>/dev/null || aws configure get region)
         else

@@ -1,7 +1,6 @@
-# ECS Resources
-# Container service that processes uploaded map files
+# Container service for processing uploaded map files
 
-# ECR Repository for processor container
+# ECR repository stores the processor Docker image
 resource "aws_ecr_repository" "processor" {
 	name                 = "${var.project_name}-processor-${var.environment}"
 	image_tag_mutability = "MUTABLE"
@@ -14,7 +13,7 @@ resource "aws_ecr_repository" "processor" {
 	tags = local.tags
 }
 
-# ECS Cluster
+# Main ECS cluster
 resource "aws_ecs_cluster" "main" {
 	name = "${var.project_name}-cluster-${var.environment}"
 
@@ -146,13 +145,13 @@ resource "aws_iam_role_policy" "ecs_task" {
 	})
 }
 
-# ECS Task Definition
+# Task definition - tells ECS how to run the processor container
 resource "aws_ecs_task_definition" "processor" {
 	family                   = "${var.project_name}-processor-${var.environment}"
 	network_mode             = "awsvpc"
 	requires_compatibilities = ["FARGATE"]
-	cpu                      = "256"  # 0.25 vCPU
-	memory                   = "512"  # 512 MB
+	cpu                      = "4096"  # 4 vCPU - production config for ML models and image processing
+	memory                   = "8192"  # 8 GB - production config with safety margin for EasyOCR + OpenCV
 	execution_role_arn       = local.ecs_task_execution_role_arn
 	task_role_arn            = local.ecs_task_role_arn
 

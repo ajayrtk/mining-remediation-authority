@@ -1,9 +1,6 @@
-/**
- * Server-side data loader for the maps registry page
- * Fetches all processed maps from DynamoDB
- */
+// Maps registry data loader - fetches all processed maps from DynamoDB
 
-import { ScanCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { ScanCommand, GetCommand} from '@aws-sdk/lib-dynamodb';
 import { MAPS_TABLE, MAP_JOBS_TABLE, dynamoDocClient } from '$lib/server/dynamo';
 import type { PageServerLoad } from './$types';
 
@@ -47,7 +44,6 @@ const fetchMaps = async (limit: number = 50, lastKey?: any): Promise<{ maps: Map
 				const jobId = item.jobId ? String(item.jobId) : undefined;
 				let jobStatus = undefined;
 
-				// Fetch job status from MAP_JOBS_TABLE if jobId exists
 				if (jobId && MAP_JOBS_TABLE) {
 					try {
 						const jobResult = await dynamoDocClient.send(

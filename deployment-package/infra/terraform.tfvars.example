@@ -38,7 +38,6 @@ use_existing_iam_roles = false
 # Leave as null or omit roles you want to create
 existing_iam_role_names = {
   input_handler           = null  # "existing-input-handler-role"
-  mock_ecs               = null  # "existing-mock-ecs-role"
   output_handler         = null  # "existing-output-handler-role"
   s3_copy_processor      = null  # "existing-s3-copy-processor-role"
   ecs_task_execution     = null  # "existing-ecs-task-execution-role"
@@ -54,7 +53,6 @@ existing_iam_role_names = {
 # use_existing_iam_roles = true
 # existing_iam_role_names = {
 #   input_handler           = "mra-mines-input-handler"
-#   mock_ecs               = "mra-mines-mock-ecs"
 #   output_handler         = "mra-mines-output-handler"
 #   s3_copy_processor      = "mra-mines-s3-copy-processor"
 #   ecs_task_execution     = "mra-mines-ecs-task-execution"

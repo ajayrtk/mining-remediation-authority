@@ -1,9 +1,4 @@
-/**
-2 * Cognito Pre-Authentication Lambda Trigger
- *
- * Validates email domain before allowing user to sign in.
- * Only allows emails from stfc.ac.uk domain.
- */
+// Pre-auth trigger - validates user email domain (only allows stfc.ac.uk)
 
 const ALLOWED_DOMAIN = 'stfc.ac.uk';
 
@@ -14,7 +9,6 @@ exports.handler = async (event) => {
 		triggerSource: event.triggerSource
 	});
 
-	// Get user's email from event
 	const email = event.request.userAttributes.email;
 
 	if (!email) {
@@ -22,7 +16,6 @@ exports.handler = async (event) => {
 		throw new Error(`Only @${ALLOWED_DOMAIN} email addresses are allowed to sign in.`);
 	}
 
-	// Extract and validate domain
 	const emailParts = email.toLowerCase().split('@');
 	if (emailParts.length !== 2) {
 		console.error('Invalid email format', { email });
@@ -41,7 +34,5 @@ exports.handler = async (event) => {
 	}
 
 	console.log('Domain validation passed', { email, domain });
-
-	// Return event to allow authentication to continue
 	return event;
 };

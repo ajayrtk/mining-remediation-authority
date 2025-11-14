@@ -1,5 +1,4 @@
-# --- Cognito Resources ---
-
+# User authentication with AWS Cognito
 resource "random_string" "cognito_domain_suffix" {
 	length  = 4
 	special = false
@@ -11,6 +10,30 @@ locals {
 		"%s-%s",
 		replace(lower(var.project_name), "[^a-z0-9]", "-"),
 		random_string.cognito_domain_suffix.result
+	)
+
+	# Callback URLs - includes localhost, ALB DNS, and custom domain if enabled
+	callback_urls = concat(
+		[
+			"http://localhost:5173/auth/callback",
+			"https://${aws_lb.frontend.dns_name}/auth/callback"
+		],
+		var.enable_custom_domain ? [
+			"https://www.${var.domain_name}/auth/callback",
+			"https://${var.domain_name}/auth/callback"
+		] : []
+	)
+
+	# Logout URLs - includes localhost, ALB DNS, and custom domain if enabled
+	logout_urls = concat(
+		[
+			"http://localhost:5173/",
+			"https://${aws_lb.frontend.dns_name}/"
+		],
+		var.enable_custom_domain ? [
+			"https://www.${var.domain_name}/",
+			"https://${var.domain_name}/"
+		] : []
 	)
 }
 
@@ -68,14 +91,8 @@ resource "aws_cognito_user_pool_client" "web" {
 	allowed_oauth_flows_user_pool_client = true
 	allowed_oauth_flows              = ["code"]
 	allowed_oauth_scopes             = ["openid", "email", "profile"]
-	callback_urls                    = [
-		"http://localhost:5173/auth/callback",
-		"https://${aws_lb.frontend.dns_name}/auth/callback"
-	]
-	logout_urls                      = [
-		"http://localhost:5173/",
-		"https://${aws_lb.frontend.dns_name}/"
-	]
+	callback_urls                    = local.callback_urls
+	logout_urls                      = local.logout_urls
 	supported_identity_providers     = ["COGNITO"]
 	prevent_user_existence_errors    = "ENABLED"
 	refresh_token_validity           = 30
