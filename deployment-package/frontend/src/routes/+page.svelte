@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { page } from '$app/stores';
 	import { invalidateAll } from '$app/navigation';
+	import { onDestroy } from 'svelte';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { ActionData, PageData } from './$types';
 	import type { JobSummary } from './+page.server';
@@ -36,6 +37,10 @@
 	let uploadProgress: UploadProgress[] = [];
 	let validationResults: ValidationResult[] = [];
 	let formState: UploadFormState | null = null;
+
+	// Auto-refresh configuration
+	const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
+	let autoRefreshInterval: ReturnType<typeof setInterval> | null = null;
 
 	// Pagination state
 	let currentPage = 1;
@@ -404,6 +409,37 @@
 			isRefreshing = false;
 		}
 	};
+
+	// Start auto-refresh when user is authenticated
+	const startAutoRefresh = () => {
+		if (autoRefreshInterval) return; // Already running
+
+		autoRefreshInterval = setInterval(async () => {
+			if (!isRefreshing) {
+				await invalidateAll();
+			}
+		}, AUTO_REFRESH_INTERVAL);
+	};
+
+	// Stop auto-refresh
+	const stopAutoRefresh = () => {
+		if (autoRefreshInterval) {
+			clearInterval(autoRefreshInterval);
+			autoRefreshInterval = null;
+		}
+	};
+
+	// Manage auto-refresh based on user authentication
+	$: if (user) {
+		startAutoRefresh();
+	} else {
+		stopAutoRefresh();
+	}
+
+	// Cleanup on component destroy
+	onDestroy(() => {
+		stopAutoRefresh();
+	});
 </script>
 
 <div class="layout">
