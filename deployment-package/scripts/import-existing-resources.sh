@@ -43,7 +43,6 @@ declare -A IAM_ROLES=(
     ["aws_iam_role.ecs_task_execution"]="${PROJECT_NAME}-ecs-task-execution-${ENVIRONMENT}"
     ["aws_iam_role.ecs_task"]="${PROJECT_NAME}-ecs-task-${ENVIRONMENT}"
     ["aws_iam_role.input_handler"]="${PROJECT_NAME}-input-handler-${ENVIRONMENT}"
-    ["aws_iam_role.mock_ecs"]="${PROJECT_NAME}-mock-ecs-${ENVIRONMENT}"
     ["aws_iam_role.output_handler"]="${PROJECT_NAME}-output-handler-${ENVIRONMENT}"
     ["aws_iam_role.s3_copy_processor"]="${PROJECT_NAME}-s3-copy-processor-${ENVIRONMENT}"
     ["aws_iam_role.pre_auth_trigger"]="${PROJECT_NAME}-pre-auth-trigger-role-${ENVIRONMENT}"

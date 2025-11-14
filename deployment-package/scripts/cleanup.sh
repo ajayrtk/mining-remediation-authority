@@ -333,7 +333,6 @@ except:
         "${PROJECT_NAME}-ecs-task-execution-${ENVIRONMENT}"
         "${PROJECT_NAME}-ecs-task-${ENVIRONMENT}"
         "${PROJECT_NAME}-input-handler-${ENVIRONMENT}"
-        "${PROJECT_NAME}-mock-ecs-${ENVIRONMENT}"
         "${PROJECT_NAME}-output-handler-${ENVIRONMENT}"
         "${PROJECT_NAME}-s3-copy-processor-${ENVIRONMENT}"
         "${PROJECT_NAME}-pre-auth-trigger-role-${ENVIRONMENT}"
@@ -399,7 +398,6 @@ except:
         "/ecs/${PROJECT_NAME}-processor-${ENVIRONMENT}"
         "/aws/lambda/${PROJECT_NAME}-input-handler-${ENVIRONMENT}"
         "/aws/lambda/${PROJECT_NAME}-output-handler-${ENVIRONMENT}"
-        "/aws/lambda/${PROJECT_NAME}-mock-ecs-${ENVIRONMENT}"
         "/aws/lambda/${PROJECT_NAME}-s3-copy-processor-${ENVIRONMENT}"
         "/aws/lambda/${PROJECT_NAME}-pre-auth-trigger-${ENVIRONMENT}"
     )

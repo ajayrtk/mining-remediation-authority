@@ -26,7 +26,6 @@ ROLES=(
     "${PROJECT_NAME}-ecs-task-execution-${ENVIRONMENT}"
     "${PROJECT_NAME}-ecs-task-${ENVIRONMENT}"
     "${PROJECT_NAME}-input-handler-${ENVIRONMENT}"
-    "${PROJECT_NAME}-mock-ecs-${ENVIRONMENT}"
     "${PROJECT_NAME}-output-handler-${ENVIRONMENT}"
     "${PROJECT_NAME}-s3-copy-processor-${ENVIRONMENT}"
     "${PROJECT_NAME}-pre-auth-trigger-role-${ENVIRONMENT}"
