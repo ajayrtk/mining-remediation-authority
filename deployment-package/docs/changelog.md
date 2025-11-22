@@ -1,5 +1,47 @@
 # Changelog
 
+## 2025-11-14 - Performance Optimization & UX Improvements
+
+### Added
+- **Frontend Auto-Refresh** - Real-time data updates without manual refresh
+  - Auto-refresh for Recent Job Activity (10-second interval)
+  - Auto-refresh for Job Pipeline Overview statistics
+  - Auto-refresh for All Maps table view
+  - Automatic start/stop based on user authentication
+  - Proper cleanup on component unmount
+
+### Changed
+- **ECS Processor Resources Upgraded** - Improved processing performance
+  - CPU: 4 vCPU → 8 vCPU (2x increase)
+  - Memory: 8 GB → 16 GB (2x increase)
+  - Expected processing time reduction: 30-50%
+  - Better handling of ML models (EasyOCR) and image processing (OpenCV)
+
+### Removed
+- **Redundant .gitignore Files** - Simplified project structure
+  - Removed `/deployment-package/infra/.gitignore` (16 lines, redundant)
+  - Removed `/deployment-package/frontend/.gitignore` (24 lines, redundant)
+  - Consolidated to single root `.gitignore` (229 lines, comprehensive)
+
+### Files Modified
+- `deployment-package/infra/ecs.tf` - Updated task definition resources (lines 153-154)
+- `deployment-package/frontend/src/routes/+page.svelte` - Added auto-refresh to job activity
+- `deployment-package/frontend/src/routes/maps/+page.svelte` - Added auto-refresh to maps table
+- Removed redundant .gitignore files
+
+### Performance Metrics
+**Processing Time Analysis (Pre-Upgrade):**
+- File: 16287_453465.zip
+- Total time: 12 min 38 sec
+- Processing stage: 9 min 31 sec (75% of total)
+- Queue wait: 3 min 7 sec
+
+**Expected Performance (Post-Upgrade):**
+- Processing stage: ~5-7 minutes (estimated)
+- Total time: ~8-10 minutes (estimated)
+
+---
+
 ## 2025-11-06 - Infrastructure Hardening & Fixes
 
 ### Added

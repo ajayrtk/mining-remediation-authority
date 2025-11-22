@@ -150,8 +150,8 @@ resource "aws_ecs_task_definition" "processor" {
 	family                   = "${var.project_name}-processor-${var.environment}"
 	network_mode             = "awsvpc"
 	requires_compatibilities = ["FARGATE"]
-	cpu                      = "4096"  # 4 vCPU - production config for ML models and image processing
-	memory                   = "8192"  # 8 GB - production config with safety margin for EasyOCR + OpenCV
+	cpu                      = "8192"  # 8 vCPU - upgraded config for faster ML models and image processing
+	memory                   = "16384"  # 16 GB - upgraded config with larger safety margin for EasyOCR + OpenCV
 	execution_role_arn       = local.ecs_task_execution_role_arn
 	task_role_arn            = local.ecs_task_role_arn
 

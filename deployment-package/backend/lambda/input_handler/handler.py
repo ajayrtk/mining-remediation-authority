@@ -46,6 +46,71 @@ def truncate(value: str, limit: int = 500) -> str:
     return value[:limit] if value else ""
 
 
+def validate_filename(filename: str) -> tuple[bool, str, str, str]:
+    """
+    Validate map filename format - Lambda-level enforcement
+    Catches files that bypass frontend validation (e.g., direct S3 uploads)
+
+    Format: SeamID_SheetNumber[_optional_suffix].zip
+    - SeamID: MANDATORY, non-empty alphanumeric (before first underscore)
+    - Underscore: MANDATORY separator
+    - SheetNumber: MANDATORY, exactly 6 digits in format XXXXXX or XX_XXXX
+
+    Returns: (is_valid, seam_id, sheet_number, error_message)
+    """
+    import re
+
+    # Remove file extension
+    name_without_ext = re.sub(r'\.(zip|jpg|jpeg|tif|tiff)$', '', filename, flags=re.IGNORECASE)
+
+    # Check for mandatory underscore
+    if '_' not in name_without_ext:
+        return False, '', '', f"Missing mandatory underscore separator. Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip')"
+
+    # Split at first underscore only
+    first_underscore_idx = name_without_ext.index('_')
+    seam_id = name_without_ext[:first_underscore_idx]
+    after_seam_id = name_without_ext[first_underscore_idx + 1:]
+
+    # Validate seam ID exists and is non-empty
+    if not seam_id or seam_id.strip() == '':
+        return False, '', '', f"Missing mandatory seam ID before underscore. Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip')"
+
+    # Validate seam ID contains only alphanumeric characters
+    if not re.match(r'^[a-zA-Z0-9]+$', seam_id):
+        return False, seam_id, '', f"Invalid seam ID '{seam_id}'. Seam ID must contain only letters and numbers."
+
+    # Check if sheet number part exists
+    if not after_seam_id or after_seam_id.strip() == '':
+        return False, seam_id, '', f"Missing sheet number after underscore. Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip')"
+
+    # Try format 1: 2 digits + separator + 4 digits (e.g., 43_3857)
+    format1_match = re.match(r'^(\d{2})[-\s_](\d{4})(?:[-\s_]|$)', after_seam_id)
+    if format1_match:
+        sheet_number = format1_match.group(1) + format1_match.group(2)
+        return True, seam_id, sheet_number, ''
+
+    # Try format 2: 6 consecutive digits (e.g., 433857)
+    format2_match = re.match(r'^(\d{6})(?:[-\s_]|$)', after_seam_id)
+    if format2_match:
+        sheet_number = format2_match.group(1)
+        return True, seam_id, sheet_number, ''
+
+    # If we get here, no valid 6-digit pattern was found
+    # Count digits for better error message
+    all_digits = re.sub(r'\D', '', after_seam_id)
+
+    if len(all_digits) == 0:
+        return False, seam_id, '', f"No digits found in sheet number part. Sheet number must be exactly 6 digits."
+    elif len(all_digits) < 6:
+        return False, seam_id, '', f"Sheet number must be exactly 6 digits, found {len(all_digits)} digits. Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip' or '16516_43_3857.zip')"
+    elif len(all_digits) > 6:
+        return False, seam_id, '', f"Sheet number has too many digits ({len(all_digits)}). First 6 digits must be at the start after seam ID, format: XXXXXX or XX_XXXX."
+    else:
+        # Exactly 6 digits but not at the start
+        return False, seam_id, '', f"Sheet number format is incorrect. Expected 6 digits immediately after first underscore in format XXXXXX or XX_XXXX. Valid examples: '16516_433857.zip' or '16516_43_3857.zip'"
+
+
 def get_s3_metadata(bucket: str, key: str) -> dict:
     """
     Retrieve metadata from the uploaded S3 object
@@ -168,6 +233,57 @@ def create_or_get_job(job_id: str, submitted_by: str, timestamp: str, batch_size
             raise
 
 
+def sync_map_status(job_id: str, new_status: str) -> None:
+    """
+    Synchronize map statuses with job status
+    Updates all maps belonging to a job to match the job's current status
+    This ensures consistency between map-jobs table and maps table
+    """
+    if not (MAPS_TABLE_NAME and job_id):
+        return
+
+    try:
+        # Query all maps belonging to this job using the JobIdIndex GSI
+        response = dynamo.query(
+            TableName=MAPS_TABLE_NAME,
+            IndexName="JobIdIndex",
+            KeyConditionExpression="jobId = :jobId",
+            ExpressionAttributeValues={
+                ":jobId": {"S": job_id}
+            }
+        )
+
+        maps = response.get("Items", [])
+        timestamp = iso_timestamp()
+
+        # Update each map's status to match the job status
+        for map_item in maps:
+            map_id = map_item.get("mapId", {}).get("S")
+            map_name = map_item.get("mapName", {}).get("S")
+
+            if map_id and map_name:
+                try:
+                    dynamo.update_item(
+                        TableName=MAPS_TABLE_NAME,
+                        Key={
+                            "mapId": {"S": map_id},
+                            "mapName": {"S": map_name}
+                        },
+                        UpdateExpression="SET #status = :status, updatedAt = :updated",
+                        ExpressionAttributeNames={"#status": "status"},
+                        ExpressionAttributeValues={
+                            ":status": {"S": new_status},
+                            ":updated": {"S": timestamp}
+                        }
+                    )
+                    logging.info(f"Synced map {map_id}/{map_name} status to {new_status}")
+                except ClientError as exc:
+                    logging.exception(f"Failed to sync map status for {map_id}/{map_name}", extra={"error": str(exc)})
+
+    except ClientError as exc:
+        logging.exception(f"Failed to query maps for job {job_id}", extra={"error": str(exc)})
+
+
 def mark_failed(job_id: str, reason: str) -> None:
     """Mark a job as FAILED in DynamoDB - used when Lambda itself fails"""
     if not (TABLE_NAME and job_id):
@@ -265,6 +381,57 @@ def lambda_handler(event, _context):
         # Extract just the filename (no path)
         map_name = key.split('/')[-1] if '/' in key else key
 
+        # Validate filename format - catches files that bypass frontend validation
+        # This is a critical security check for direct S3 uploads
+        is_valid, seam_id, sheet_number, error_msg = validate_filename(map_name)
+        if not is_valid:
+            logging.error(f"Invalid filename format: {map_name} - {error_msg}")
+
+            # Get metadata to create proper tracking records even for invalid files
+            metadata = get_s3_metadata(bucket, key)
+            submitted_by = metadata.get("submittedby", "system")
+            map_id = metadata.get("mapid", f"map_{uuid4().hex[:12]}")
+            job_id = metadata.get("jobid", f"JobId-{str(uuid4())}")
+            batch_size = int(metadata.get("batchsize", "1"))
+
+            # Create/get job record
+            try:
+                create_or_get_job(job_id, submitted_by, timestamp, batch_size)
+            except ClientError:
+                logging.exception("Failed to create/get job record for invalid file")
+
+            # Create MAP entry with FAILED status and validation error
+            if MAPS_TABLE_NAME:
+                try:
+                    dynamo.put_item(
+                        TableName=MAPS_TABLE_NAME,
+                        Item={
+                            "mapId": {"S": map_id},
+                            "mapName": {"S": map_name},
+                            "ownerEmail": {"S": submitted_by},
+                            "createdAt": {"S": timestamp},
+                            "sizeBytes": {"N": str(size_bytes)},
+                            "mapVersion": {"N": "1"},
+                            "jobId": {"S": job_id},
+                            "status": {"S": "FAILED"},
+                            "errorMessage": {"S": f"Invalid filename format: {error_msg}"}
+                        }
+                    )
+                    logging.info(f"Created FAILED MAP entry for invalid filename: {map_name}")
+                except ClientError:
+                    logging.exception(f"Failed to create MAP entry for invalid file: {map_name}")
+
+            # Record the failure and skip processing
+            records.append({
+                "jobId": job_id,
+                "mapId": map_id,
+                "bucket": bucket,
+                "key": key,
+                "status": "FAILED",
+                "error": f"Invalid filename: {error_msg}"
+            })
+            continue  # Skip to next file
+
         # Get the metadata that the frontend set when uploading
         # This includes jobId, mapId (hash), batchSize, and who uploaded it
         metadata = get_s3_metadata(bucket, key)
@@ -311,6 +478,27 @@ def lambda_handler(event, _context):
                         ":status": {"S": "DISPATCHED"}
                     },
                 )
+
+                # Update individual map status to DISPATCHED
+                if MAPS_TABLE_NAME:
+                    try:
+                        dynamo.update_item(
+                            TableName=MAPS_TABLE_NAME,
+                            Key={
+                                "mapId": {"S": map_id},
+                                "mapName": {"S": map_name}
+                            },
+                            UpdateExpression="SET #status = :status, updatedAt = :updated",
+                            ExpressionAttributeNames={"#status": "status"},
+                            ExpressionAttributeValues={
+                                ":status": {"S": "DISPATCHED"},
+                                ":updated": {"S": timestamp}
+                            }
+                        )
+                        logging.info(f"Updated map {map_id}/{map_name} status to DISPATCHED")
+                    except ClientError as exc:
+                        logging.exception(f"Failed to update map {map_id} to DISPATCHED", extra={"error": str(exc)})
+
                 records.append({"jobId": job_id, "mapId": map_id, "bucket": bucket, "key": key, "status": "DISPATCHED"})
             else:
                 # ECS launch failed - fall back to Lambda processor
@@ -339,6 +527,27 @@ def lambda_handler(event, _context):
                         ":status": {"S": "DISPATCHED"}
                     },
                 )
+
+                # Update individual map status to DISPATCHED
+                if MAPS_TABLE_NAME:
+                    try:
+                        dynamo.update_item(
+                            TableName=MAPS_TABLE_NAME,
+                            Key={
+                                "mapId": {"S": map_id},
+                                "mapName": {"S": map_name}
+                            },
+                            UpdateExpression="SET #status = :status, updatedAt = :updated",
+                            ExpressionAttributeNames={"#status": "status"},
+                            ExpressionAttributeValues={
+                                ":status": {"S": "DISPATCHED"},
+                                ":updated": {"S": timestamp}
+                            }
+                        )
+                        logging.info(f"Updated map {map_id}/{map_name} status to DISPATCHED (Lambda fallback)")
+                    except ClientError as exc:
+                        logging.exception(f"Failed to update map {map_id} to DISPATCHED", extra={"error": str(exc)})
+
                 records.append({"jobId": job_id, "mapId": map_id, "bucket": bucket, "key": key, "status": "DISPATCHED"})
         except ClientError as exc:
             # Something went wrong with dispatching - mark the whole job as failed

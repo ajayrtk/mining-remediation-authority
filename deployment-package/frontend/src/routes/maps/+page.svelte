@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import type { PageData } from './$types';
 	import type { MapEntry } from './+page.server';
@@ -6,12 +7,23 @@
 
 	export let data: PageData;
 
+	// Auto-refresh configuration
+	const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
+	let autoRefreshInterval: ReturnType<typeof setInterval> | null = null;
+
 	let isRefreshing = false;
 
 	let searchQuery = '';
 	let currentPage = 1;
 	const itemsPerPage = 10;
 	let downloadingMapId: string | null = null;
+	let deletingMapId: string | null = null;
+	let retryingMapId: string | null = null;
+	let confirmDeleteMap: MapEntry | null = null;
+
+	// Bulk download state
+	let selectedMaps: Set<string> = new Set();
+	let bulkDownloading = false;
 
 	// Sort state
 	let sortColumn: 'mapName' | 'ownerEmail' | 'sizeBytes' | 'createdAt' | 'jobStatus' = 'createdAt';
@@ -28,6 +40,15 @@
 
 	$: allMaps = (data.maps ?? []) as MapEntry[];
 	$: user = data.user;
+
+	// Calculate job statistics for job pipeline overview
+	const statusGroups = ['QUEUED', 'DISPATCHED', 'PROCESSING', 'AWAITING_OUTPUT'];
+	$: stats = {
+		total: allMaps.length,
+		active: allMaps.filter((map) => statusGroups.includes(map.jobStatus ?? '')).length,
+		completed: allMaps.filter((map) => map.jobStatus === 'COMPLETED').length,
+		failed: allMaps.filter((map) => map.jobStatus === 'FAILED').length
+	};
 
 	// Search functionality
 	$: filteredMaps = allMaps.filter((map) => {
@@ -83,6 +104,80 @@
 	);
 
 	$: if (searchQuery) currentPage = 1;
+
+	// Bulk download computed properties
+	$: completedMapsOnPage = paginatedMaps.filter((map) => map.jobStatus === 'COMPLETED');
+	$: allCompletedSelected = completedMapsOnPage.length > 0 && completedMapsOnPage.every((map) => selectedMaps.has(map.mapId));
+	$: selectedCount = selectedMaps.size;
+
+	// Bulk download functions
+	const toggleMapSelection = (mapId: string) => {
+		if (selectedMaps.has(mapId)) {
+			selectedMaps.delete(mapId);
+		} else {
+			selectedMaps.add(mapId);
+		}
+		selectedMaps = selectedMaps; // Trigger reactivity
+	};
+
+	const toggleSelectAll = () => {
+		if (allCompletedSelected) {
+			// Deselect all completed maps on current page
+			completedMapsOnPage.forEach((map) => selectedMaps.delete(map.mapId));
+		} else {
+			// Select all completed maps on current page
+			completedMapsOnPage.forEach((map) => selectedMaps.add(map.mapId));
+		}
+		selectedMaps = selectedMaps; // Trigger reactivity
+	};
+
+	const bulkDownloadMaps = async () => {
+		if (selectedCount === 0) return;
+
+		bulkDownloading = true;
+		try {
+			// Get all selected map details
+			const mapsToDownload = allMaps.filter((map) => selectedMaps.has(map.mapId));
+
+			const response = await fetch('/api/bulk-download', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					maps: mapsToDownload.map((map) => ({
+						mapId: map.mapId,
+						mapName: map.mapName,
+						bucket: map.s3Output?.bucket,
+						key: map.s3Output?.key
+					}))
+				})
+			});
+
+			if (!response.ok) {
+				const error = await response.json();
+				throw new Error(error.error || 'Failed to download maps');
+			}
+
+			// Get the ZIP file as a blob
+			const blob = await response.blob();
+			const url = window.URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = `maps-${new Date().toISOString().split('T')[0]}.zip`;
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+			window.URL.revokeObjectURL(url);
+
+			// Clear selection after successful download
+			selectedMaps.clear();
+			selectedMaps = selectedMaps;
+		} catch (error) {
+			console.error('Bulk download failed:', error);
+			alert(error instanceof Error ? error.message : 'Failed to download maps');
+		} finally {
+			bulkDownloading = false;
+		}
+	};
 
 	const formatDate = (value?: string) => {
 		if (!value) return '—';
@@ -207,6 +302,124 @@
 			downloadingMapId = null;
 		}
 	};
+
+	// Check if retry is available for a failed map (within 5 days)
+	const isRetryAvailable = (map: MapEntry): boolean => {
+		if (map.jobStatus !== 'FAILED') return false;
+
+		const createdDate = new Date(map.createdAt);
+		const now = new Date();
+		const daysDiff = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24);
+
+		return daysDiff <= 5;
+	};
+
+	// Retry failed map function
+	const retryMap = async (map: MapEntry) => {
+		if (!confirm(`🔄 Retry processing for "${removeZipExtension(map.mapName)}"?\n\nThis will resubmit the map for processing.`)) {
+			return;
+		}
+
+		retryingMapId = map.mapId;
+
+		try {
+			const response = await fetch('/api/retry-map', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					mapId: map.mapId,
+					mapName: map.mapName
+				})
+			});
+
+			if (!response.ok) {
+				const error = await response.json();
+				throw new Error(error.error || 'Failed to retry map');
+			}
+
+			const result = await response.json();
+			console.log('Retried:', result);
+
+			// Refresh the maps list
+			await invalidateAll();
+
+			alert(`Successfully retried "${removeZipExtension(map.mapName)}"`);
+		} catch (error) {
+			console.error('Retry failed:', error);
+			alert(error instanceof Error ? error.message : 'Failed to retry map');
+		} finally {
+			retryingMapId = null;
+		}
+	};
+
+	// Delete map function
+	const deleteMap = async (map: MapEntry) => {
+		if (!confirm(`⚠️ Are you sure you want to delete Map?\n\nThis will permanently delete this map and all its processed data.\nThis action cannot be undone.`)) {
+			return;
+		}
+
+		deletingMapId = map.mapId;
+
+		try {
+			const response = await fetch('/api/delete-map', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					mapId: map.mapId,
+					mapName: map.mapName
+				})
+			});
+
+			if (!response.ok) {
+				const error = await response.json();
+				throw new Error(error.error || 'Failed to delete map');
+			}
+
+			const result = await response.json();
+			console.log('Deleted:', result);
+
+			// Refresh the maps list
+			await invalidateAll();
+
+			alert(`Successfully deleted "${removeZipExtension(map.mapName)}"`);
+		} catch (error) {
+			console.error('Delete failed:', error);
+			alert(error instanceof Error ? error.message : 'Failed to delete map');
+		} finally {
+			deletingMapId = null;
+		}
+	};
+
+	// Start auto-refresh when user is authenticated
+	const startAutoRefresh = () => {
+		if (autoRefreshInterval) return; // Already running
+
+		autoRefreshInterval = setInterval(async () => {
+			if (!isRefreshing) {
+				await invalidateAll();
+			}
+		}, AUTO_REFRESH_INTERVAL);
+	};
+
+	// Stop auto-refresh
+	const stopAutoRefresh = () => {
+		if (autoRefreshInterval) {
+			clearInterval(autoRefreshInterval);
+			autoRefreshInterval = null;
+		}
+	};
+
+	// Manage auto-refresh based on user authentication
+	$: if (user) {
+		startAutoRefresh();
+	} else {
+		stopAutoRefresh();
+	}
+
+	// Cleanup on component destroy
+	onDestroy(() => {
+		stopAutoRefresh();
+	});
 </script>
 
 <div class="layout">
@@ -269,11 +482,77 @@
 
 	{#if !user}
 		<section class="panel sign-in-panel">
-			<h3>Sign in to continue</h3>
-			<p>Sign in with your account to view processed maps.</p>
-			<a class="button primary" href="/auth/login">Sign in</a>
+			<div class="sign-in-content">
+				<div class="sign-in-icon">
+					<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"></path>
+						<path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z"></path>
+					</svg>
+				</div>
+				<h2>Access Your Maps</h2>
+				<p class="sign-in-description">Sign in to view, download, and manage your processed mining maps.</p>
+
+				<ul class="sign-in-features">
+					<li>
+						<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<polyline points="20 6 9 17 4 12"></polyline>
+						</svg>
+						<span>View all your processed maps</span>
+					</li>
+					<li>
+						<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<polyline points="20 6 9 17 4 12"></polyline>
+						</svg>
+						<span>Download results instantly</span>
+					</li>
+					<li>
+						<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<polyline points="20 6 9 17 4 12"></polyline>
+						</svg>
+						<span>Track processing status in real-time</span>
+					</li>
+				</ul>
+
+				<a class="button primary sign-in-button" href="/auth/login">
+					<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+						<polyline points="10 17 15 12 10 7"></polyline>
+						<line x1="15" y1="12" x2="3" y2="12"></line>
+					</svg>
+					Sign in to Continue
+				</a>
+			</div>
 		</section>
 	{:else}
+		<section class="hero">
+			<div class="hero-copy">
+				<h2>Job pipeline overview</h2>
+				<p>
+					Each upload goes through automated validation, processing, and completion.<br />Track system performance and job reliability using the live counters.
+				</p>
+			</div>
+			<div class="hero-stats">
+				<div class="stat-card">
+					<span class="label">Maps submitted</span>
+					<strong>{stats.total}</strong>
+				</div>
+				<div class="stat-card">
+					<span class="label">In progress</span>
+					<strong>{stats.active}</strong>
+				</div>
+				<div class="stat-card">
+					<span class="label">Completed</span>
+					<strong>{stats.completed}</strong>
+				</div>
+				<div class="stat-card caution">
+					<span class="label">Failed</span>
+					<strong>{stats.failed}</strong>
+				</div>
+			</div>
+		</section>
+	{/if}
+
+	{#if user}
 		<section class="panel">
 			<header class="panel-header">
 				<div>
@@ -309,6 +588,31 @@
 						</svg>
 						{isRefreshing ? 'Refreshing...' : 'Refresh'}
 					</button>
+					{#if selectedCount > 0}
+						<button
+							class="button primary download-selected-button"
+							on:click={bulkDownloadMaps}
+							disabled={bulkDownloading}
+							title="Download selected maps as a ZIP file"
+						>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								width="18"
+								height="18"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							>
+								<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+								<polyline points="7 10 12 15 17 10"></polyline>
+								<line x1="12" y1="15" x2="12" y2="3"></line>
+							</svg>
+							{bulkDownloading ? 'Downloading...' : `Download Selected (${selectedCount})`}
+						</button>
+					{/if}
 				</div>
 			</header>
 
@@ -325,6 +629,16 @@
 					<table>
 						<thead>
 							<tr>
+								<th class="checkbox-column">
+									<input
+										type="checkbox"
+										checked={allCompletedSelected}
+										indeterminate={selectedCount > 0 && !allCompletedSelected}
+										on:click={toggleSelectAll}
+										disabled={completedMapsOnPage.length === 0}
+										title={completedMapsOnPage.length === 0 ? 'No completed maps to select' : 'Select all completed maps'}
+									/>
+								</th>
 								<th class="sortable" on:click={() => handleSort('mapName')}>
 									<span class="th-content">
 										Map Name
@@ -371,6 +685,15 @@
 						<tbody>
 							{#each paginatedMaps as map}
 								<tr>
+									<td class="checkbox-column">
+										<input
+											type="checkbox"
+											checked={selectedMaps.has(map.mapId)}
+											on:change={() => toggleMapSelection(map.mapId)}
+											disabled={map.jobStatus !== 'COMPLETED'}
+											title={map.jobStatus !== 'COMPLETED' ? 'Only completed maps can be downloaded' : 'Select for download'}
+										/>
+									</td>
 									<td>
 										<strong class="map-name">{removeZipExtension(map.mapName)}</strong>
 									</td>
@@ -387,21 +710,59 @@
 										{/if}
 									</td>
 									<td>
-										{#if map.s3Output?.bucket && map.s3Output?.key}
-											<button
-												class="download-button"
-												on:click={() => downloadFile(map)}
-												disabled={downloadingMapId === map.mapId || map.jobStatus !== 'COMPLETED'}
-											>
-												{#if downloadingMapId === map.mapId}
-													Downloading...
+										<div class="action-buttons">
+											<div class="download-area">
+												{#if map.s3Output?.bucket && map.s3Output?.key}
+													<button
+														class="download-button"
+														on:click={() => downloadFile(map)}
+														disabled={downloadingMapId === map.mapId || map.jobStatus !== 'COMPLETED'}
+													>
+														{#if downloadingMapId === map.mapId}
+															Downloading...
+														{:else}
+															Download
+														{/if}
+													</button>
 												{:else}
-													Download
+													<span class="meta">—</span>
 												{/if}
-											</button>
-										{:else}
-											<span class="meta">—</span>
-										{/if}
+											</div>
+
+											{#if user && map.ownerEmail === user.email}
+												<button
+													class="delete-button"
+													on:click={() => deleteMap(map)}
+													disabled={deletingMapId === map.mapId || map.jobStatus === 'PROCESSING' || map.jobStatus === 'DISPATCHED' || map.jobStatus === 'QUEUED'}
+												>
+													<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class:spinning={deletingMapId === map.mapId}>
+														{#if deletingMapId === map.mapId}
+															<path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+														{:else}
+															<path d="M3 6h18"></path>
+															<path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+															<path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+															<line x1="10" y1="11" x2="10" y2="17"></line>
+															<line x1="14" y1="11" x2="14" y2="17"></line>
+														{/if}
+													</svg>
+													<span class="delete-label">{deletingMapId === map.mapId ? 'Deleting...' : 'Delete'}</span>
+												</button>
+											{/if}
+
+											{#if user && map.ownerEmail === user.email && isRetryAvailable(map)}
+												<button
+													class="retry-button"
+													on:click={() => retryMap(map)}
+													disabled={retryingMapId === map.mapId}
+												>
+													<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class:spinning={retryingMapId === map.mapId}>
+														<path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+													</svg>
+													<span class="retry-label">{retryingMapId === map.mapId ? 'Retrying...' : 'Retry'}</span>
+												</button>
+											{/if}
+										</div>
 									</td>
 								</tr>
 							{/each}
@@ -672,6 +1033,101 @@
 		box-shadow: none;
 	}
 
+	/* Hero section styles (Job pipeline overview) */
+	.hero {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 320px);
+		gap: 1.5rem;
+		padding: 1.5rem 2rem;
+		border-radius: 1.3rem;
+		background: var(--hero-background);
+		border: 1px solid var(--hero-border);
+		box-shadow: var(--hero-shadow);
+		backdrop-filter: blur(10px);
+		position: relative;
+		overflow: hidden;
+	}
+
+	.hero::after {
+		content: '';
+		position: absolute;
+		inset: -40% 45% auto -20%;
+		height: 280px;
+		border-radius: 50%;
+		background: radial-gradient(circle, rgba(124, 58, 237, 0.2), transparent 65%);
+		pointer-events: none;
+	}
+
+	.hero-copy {
+		position: relative;
+		z-index: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.hero h2 {
+		margin: 0;
+		font-size: 1.5rem;
+		font-weight: 700;
+		color: var(--text-primary);
+	}
+
+	.hero p {
+		margin: 0;
+		color: var(--text-secondary);
+		line-height: 1.5;
+		font-size: 0.9rem;
+	}
+
+	.hero-stats {
+		position: relative;
+		z-index: 1;
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 1rem;
+	}
+
+	.stat-card {
+		background: var(--panel-background);
+		border-radius: 0.85rem;
+		padding: 0.9rem 1rem;
+		border: 1px solid var(--border-subtle);
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		box-shadow: var(--shadow-elevated);
+	}
+
+	.stat-card .label {
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-muted);
+		min-height: 2em;
+		display: flex;
+		align-items: center;
+	}
+
+	.stat-card strong {
+		font-size: 1.6rem;
+		font-weight: 700;
+		color: var(--text-primary);
+	}
+
+	.stat-card.caution {
+		background: rgba(248, 113, 113, 0.12);
+		border-color: rgba(248, 113, 113, 0.42);
+	}
+
+	.stat-card.caution strong {
+		color: #b91c1c;
+	}
+
+	.stat-card.caution .label {
+		color: rgba(185, 28, 28, 0.75);
+	}
+
 	.panel {
 		background: var(--panel-background);
 		border: 1px solid var(--panel-border);
@@ -685,8 +1141,86 @@
 	}
 
 	.sign-in-panel {
-		align-items: flex-start;
-		gap: 1.2rem;
+		align-items: center;
+		justify-content: center;
+		min-height: 500px;
+		text-align: center;
+	}
+
+	.sign-in-content {
+		max-width: 480px;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 1.5rem;
+	}
+
+	.sign-in-icon {
+		width: 80px;
+		height: 80px;
+		border-radius: 50%;
+		background: linear-gradient(135deg, rgba(124, 58, 237, 0.1), rgba(167, 139, 250, 0.1));
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		margin-bottom: 0.5rem;
+	}
+
+	.sign-in-icon svg {
+		color: var(--accent-primary);
+	}
+
+	.sign-in-content h2 {
+		margin: 0;
+		font-size: 2rem;
+		font-weight: 700;
+		color: var(--text-primary);
+	}
+
+	.sign-in-description {
+		font-size: 1.05rem;
+		color: var(--text-secondary);
+		line-height: 1.6;
+		margin: 0;
+	}
+
+	.sign-in-features {
+		list-style: none;
+		padding: 0;
+		margin: 1rem 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		text-align: left;
+		width: 100%;
+	}
+
+	.sign-in-features li {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		color: var(--text-secondary);
+		font-size: 0.95rem;
+	}
+
+	.sign-in-features li svg {
+		color: var(--accent-primary);
+		flex-shrink: 0;
+	}
+
+	.sign-in-button {
+		margin-top: 1rem;
+		padding: 0.85rem 2.5rem;
+		font-size: 1.05rem;
+		font-weight: 600;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.sign-in-button svg {
+		width: 20px;
+		height: 20px;
 	}
 
 	.panel-header {
@@ -826,6 +1360,43 @@
 		color: var(--text-tertiary);
 	}
 
+	/* Checkbox column styles */
+	.checkbox-column {
+		width: 50px;
+		text-align: center;
+		padding: 0.85rem 0.5rem;
+	}
+
+	.checkbox-column input[type='checkbox'] {
+		cursor: pointer;
+		width: 18px;
+		height: 18px;
+		accent-color: #7c3aed;
+	}
+
+	.checkbox-column input[type='checkbox']:disabled {
+		cursor: not-allowed;
+		opacity: 0.4;
+	}
+
+	/* Download selected button */
+	.download-selected-button {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.7rem 1rem;
+		white-space: nowrap;
+	}
+
+	.download-selected-button svg {
+		flex-shrink: 0;
+	}
+
+	.download-selected-button:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
 	.status-badge {
 		display: inline-flex;
 		align-items: center;
@@ -864,6 +1435,19 @@
 		color: var(--text-secondary);
 	}
 
+	.action-buttons {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.download-area {
+		min-width: 100px;
+		display: inline-flex;
+		justify-content: center;
+		align-items: center;
+	}
+
 	.download-button {
 		display: inline-flex;
 		align-items: center;
@@ -889,6 +1473,86 @@
 		cursor: not-allowed;
 		box-shadow: none;
 		transform: none;
+	}
+
+	.retry-button {
+		display: inline-flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.25rem;
+		padding: 0.35rem;
+		background: transparent;
+		border: none;
+		color: #ea580c;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.retry-button:hover:not(:disabled) svg {
+		transform: scale(1.1);
+	}
+
+	.retry-button:hover:not(:disabled) .retry-label {
+		opacity: 1;
+	}
+
+	.retry-button:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+
+	.retry-button svg {
+		width: 16px;
+		height: 16px;
+		transition: transform 0.2s ease;
+	}
+
+	.retry-label {
+		font-size: 0.7rem;
+		font-weight: 600;
+		opacity: 0;
+		transition: opacity 0.2s ease;
+	}
+
+	.delete-button {
+		display: inline-flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.25rem;
+		padding: 0.35rem;
+		background: transparent;
+		border: none;
+		color: #dc2626;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.delete-button:hover:not(:disabled) svg {
+		transform: scale(1.1);
+	}
+
+	.delete-button:hover:not(:disabled) .delete-label {
+		opacity: 1;
+	}
+
+	.delete-button:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+
+	.delete-button svg {
+		width: 20px;
+		height: 20px;
+		transition: transform 0.2s ease;
+	}
+
+	.delete-label {
+		font-size: 0.7rem;
+		font-weight: 600;
+		opacity: 0;
+		transition: opacity 0.2s ease;
 	}
 
 	.pagination {
@@ -980,6 +1644,16 @@
 		}
 	}
 
+	@media (max-width: 880px) {
+		.hero {
+			grid-template-columns: 1fr;
+		}
+
+		.hero-stats {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
 	@media (max-width: 768px) {
 		.layout {
 			padding: 2.5rem 1.1rem 3.5rem;
@@ -994,6 +1668,14 @@
 		.auth-actions {
 			width: 100%;
 			justify-content: flex-start;
+		}
+
+		.hero {
+			padding: 2rem;
+		}
+
+		.hero-stats {
+			grid-template-columns: 1fr;
 		}
 
 		.panel-header {

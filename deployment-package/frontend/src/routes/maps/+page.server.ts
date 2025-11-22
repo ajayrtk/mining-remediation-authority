@@ -1,7 +1,7 @@
 // Maps registry data loader - fetches all processed maps from DynamoDB
 
-import { ScanCommand, GetCommand} from '@aws-sdk/lib-dynamodb';
-import { MAPS_TABLE, MAP_JOBS_TABLE, dynamoDocClient } from '$lib/server/dynamo';
+import { ScanCommand } from '@aws-sdk/lib-dynamodb';
+import { MAPS_TABLE, dynamoDocClient } from '$lib/server/dynamo';
 import type { PageServerLoad } from './$types';
 
 export type MapEntry = {
@@ -38,40 +38,21 @@ const fetchMaps = async (limit: number = 50, lastKey?: any): Promise<{ maps: Map
 
 		const result = await dynamoDocClient.send(new ScanCommand(params));
 
-		// Fetch job status for each map
-		const mapsWithStatus = await Promise.all(
-			(result.Items ?? []).map(async (item) => {
-				const jobId = item.jobId ? String(item.jobId) : undefined;
-				let jobStatus = undefined;
-
-				if (jobId && MAP_JOBS_TABLE) {
-					try {
-						const jobResult = await dynamoDocClient.send(
-							new GetCommand({
-								TableName: MAP_JOBS_TABLE,
-								Key: { jobId }
-							})
-						);
-						jobStatus = jobResult.Item?.status ? String(jobResult.Item.status) : undefined;
-					} catch (error) {
-						console.error(`Failed to fetch job status for ${jobId}:`, error);
-					}
-				}
-
-				return {
-					mapId: String(item.mapId ?? ''),
-					mapName: String(item.mapName ?? ''),
-					ownerEmail: String(item.ownerEmail ?? ''),
-					createdAt: String(item.createdAt ?? ''),
-					processedAt: item.processedAt ? String(item.processedAt) : undefined,
-					sizeBytes: item.sizeBytes ? Number(item.sizeBytes) : undefined,
-					mapVersion: item.mapVersion ? Number(item.mapVersion) : undefined,
-					jobId,
-					jobStatus,
-					s3Output: item.s3Output
-				};
-			})
-		);
+		// Map the items with their individual status
+		const mapsWithStatus = (result.Items ?? []).map((item) => {
+			return {
+				mapId: String(item.mapId ?? ''),
+				mapName: String(item.mapName ?? ''),
+				ownerEmail: String(item.ownerEmail ?? ''),
+				createdAt: String(item.createdAt ?? ''),
+				processedAt: item.processedAt ? String(item.processedAt) : undefined,
+				sizeBytes: item.sizeBytes ? Number(item.sizeBytes) : undefined,
+				mapVersion: item.mapVersion ? Number(item.mapVersion) : undefined,
+				jobId: item.jobId ? String(item.jobId) : undefined,
+				jobStatus: item.status ? String(item.status) : undefined,
+				s3Output: item.s3Output
+			};
+		});
 
 		return {
 			maps: mapsWithStatus,

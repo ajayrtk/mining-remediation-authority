@@ -12,6 +12,7 @@
 	export let data: PageData;
 
 	const MAX_FILES = 20;
+	const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200MB (matches backend BODY_SIZE_LIMIT)
 
 	let selectedFiles: File[] = [];
 	let isSubmitting = false;
@@ -20,7 +21,7 @@
 	let isRefreshing = false;
 	let user: PageData['user'] = data.user;
 
-	type UploadStatus = 'pending' | 'validating' | 'valid' | 'invalid' | 'uploading' | 'done' | 'error';
+	type UploadStatus = 'pending' | 'validating' | 'validating-georef' | 'valid' | 'invalid' | 'uploading' | 'done' | 'error';
 
 	type UploadFormState = ActionData & {
 		error?: string;
@@ -37,6 +38,10 @@
 	let uploadProgress: UploadProgress[] = [];
 	let validationResults: ValidationResult[] = [];
 	let formState: UploadFormState | null = null;
+
+	// Track backend validation errors separately (duplicate detection, etc.)
+	// Key: filename, Value: error message
+	let backendValidationErrors: Map<string, string> = new Map();
 
 	// Auto-refresh configuration
 	const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
@@ -64,16 +69,62 @@
 		selectedFiles = [];
 		uploadProgress = [];
 		validationResults = [];
+		backendValidationErrors = new Map();
 	}
-	$: allFilesValid = validationResults.length > 0 && allValid(validationResults);
+	// Check if all files are valid (client-side validation, georeferencing validation, and no backend errors)
+	$: allFilesValid = validationResults.length > 0 && allValid(validationResults) && backendValidationErrors.size === 0 && !uploadProgress.some(p => p.status === 'invalid');
 
-	// Calculate job statistics for dashboard
-	const statusGroups = ['QUEUED', 'DISPATCHED', 'PROCESSING', 'AWAITING_OUTPUT'];
+	// Check if any files have already been uploaded or have backend errors
+	$: hasUploadedOrErrorFiles = uploadProgress.some((p) => p.status === 'done' || p.status === 'error');
+
+	// Determine appropriate warning message based on file states
+	$: warningMessage = (() => {
+		const hasUploaded = uploadProgress.some((p) => p.status === 'done');
+		const hasErrors = uploadProgress.some((p) => p.status === 'error');
+		const hasInvalid = uploadProgress.some((p) => p.status === 'invalid');
+
+		const errorCount = uploadProgress.filter(p => p.status === 'error').length;
+		const invalidCount = uploadProgress.filter(p => p.status === 'invalid').length;
+
+		if (hasUploaded && (hasErrors || hasInvalid)) {
+			return 'Remove uploaded or rejected files to submit new files.';
+		} else if (hasUploaded) {
+			return 'Remove uploaded files to submit new files.';
+		} else if (hasErrors && hasInvalid) {
+			return `${invalidCount} validation error(s) and ${errorCount} duplicate(s) detected. Remove to continue.`;
+		} else if (hasInvalid) {
+			const plural = invalidCount > 1 ? 's' : '';
+			return `${invalidCount} file${plural} failed validation. Remove invalid files before submitting.`;
+		} else if (hasErrors) {
+			const plural = errorCount > 1 ? 's' : '';
+			return `${errorCount} duplicate${plural} detected. Remove to submit new files.`;
+		}
+		return 'Cannot submit at this time.';
+	})();
+
+	// Calculate job statistics for dashboard based on actual map statuses
+	const inProgressStatuses = ['QUEUED', 'DISPATCHED', 'PROCESSING', 'AWAITING_OUTPUT'];
+	const completedStatuses = ['COMPLETED'];
+	const failedStatuses = ['FAILED'];
+
 	$: stats = {
 		total: jobs.length,
-		active: jobs.filter((job) => statusGroups.includes(job.status)).length,
-		completed: jobs.filter((job) => job.status === 'COMPLETED').length,
-		failed: jobs.filter((job) => job.status === 'FAILED').length
+		// Count maps that are in progress across all jobs
+		active: jobs.reduce((count, job) => {
+			const inProgressMaps = (job.mapStatuses ?? []).filter(status => inProgressStatuses.includes(status)).length;
+			return count + (inProgressMaps > 0 ? 1 : 0);
+		}, 0),
+		// Count jobs where all maps are completed
+		completed: jobs.filter((job) => {
+			const allMapsCompleted = job.mapStatuses && job.mapStatuses.length > 0 &&
+				job.mapStatuses.every(status => completedStatuses.includes(status));
+			return allMapsCompleted;
+		}).length,
+		// Count jobs where any map failed
+		failed: jobs.filter((job) => {
+			const anyMapFailed = job.mapStatuses && job.mapStatuses.some(status => failedStatuses.includes(status));
+			return anyMapFailed;
+		}).length
 	};
 
 	// Pagination
@@ -127,6 +178,36 @@
 	const statusClass = (status: string) => `status-${status.toLowerCase()}`;
 	const removeZipExtension = (filename: string) => filename.replace(/\.zip$/i, '');
 
+	// Compute job status from map statuses
+	const getJobStatus = (job: JobSummary): string => {
+		const mapStatuses = job.mapStatuses ?? [];
+
+		// If no map statuses available, fall back to job status
+		if (mapStatuses.length === 0) {
+			return job.status;
+		}
+
+		const hasCompleted = mapStatuses.some(s => s === 'COMPLETED');
+		const hasFailed = mapStatuses.some(s => s === 'FAILED');
+		const hasProcessing = mapStatuses.some(s => ['PROCESSING', 'AWAITING_OUTPUT'].includes(s));
+		const hasDispatched = mapStatuses.some(s => s === 'DISPATCHED');
+		const hasQueued = mapStatuses.some(s => s === 'QUEUED');
+		const allCompleted = mapStatuses.every(s => s === 'COMPLETED');
+		const allFailed = mapStatuses.every(s => s === 'FAILED');
+
+		// Determine overall status (ordered by progression: QUEUED → DISPATCHED → PROCESSING → COMPLETED)
+		if (allCompleted) return 'COMPLETED';
+		if (allFailed) return 'FAILED';
+		if (hasFailed && hasCompleted) return 'PARTIAL_SUCCESS';
+		if (hasFailed) return 'FAILED';
+		if (hasProcessing) return 'PROCESSING';
+		if (hasDispatched) return 'DISPATCHED';
+		if (hasQueued) return 'QUEUED';
+
+		// Fallback to job status
+		return job.status;
+	};
+
 	// Handle file selection and validation
 	const onFileSelection = async (event: Event) => {
 		const input = event.currentTarget as HTMLInputElement;
@@ -150,6 +231,26 @@
 			return;
 		}
 
+		// Check file sizes (200MB limit matches backend BODY_SIZE_LIMIT)
+		const oversizedFiles = filesToAdd.filter(file => file.size > MAX_FILE_SIZE);
+		if (oversizedFiles.length > 0) {
+			const formatBytes = (bytes: number) => {
+				if (bytes === 0) return '0 Bytes';
+				const k = 1024;
+				const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+				const i = Math.floor(Math.log(bytes) / Math.log(k));
+				return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+			};
+
+			const fileList = oversizedFiles
+				.map(f => `• ${f.name} (${formatBytes(f.size)})`)
+				.join('\n');
+
+			alert(`The following files exceed the 200MB size limit and cannot be uploaded:\n\n${fileList}\n\nPlease compress the files or reduce their size.`);
+			input.value = ''; // Reset input
+			return;
+		}
+
 		selectedFiles = [...selectedFiles, ...filesToAdd];
 		input.value = ''; // Reset input so same file can be selected again
 
@@ -160,13 +261,68 @@
 
 		isValidating = true;
 		try {
+			// Step 1: Client-side JSZip validation (filename format, ZIP structure)
 			validationResults = await validateZipFiles(selectedFiles);
 			uploadProgress = validationResults.map((result) => ({
 				name: result.fileName,
-				status: result.valid ? 'valid' : 'invalid',
+				status: result.valid ? 'validating-georef' : 'invalid',
 				error: result.error,
 				imagesFound: result.imagesFound
 			}));
+
+			// Step 2: Backend georeferencing validation for files that passed client-side validation
+			const filesToValidateGeoref = selectedFiles.filter((file, index) => validationResults[index].valid);
+
+			if (filesToValidateGeoref.length > 0) {
+				console.log(`[Frontend] Validating georeferencing for ${filesToValidateGeoref.length} files`);
+
+				// Validate files sequentially to avoid overwhelming the server
+				for (let i = 0; i < filesToValidateGeoref.length; i++) {
+					const file = filesToValidateGeoref[i];
+					const progressIndex = uploadProgress.findIndex(p => p.name === file.name);
+
+					if (progressIndex === -1) continue;
+
+					try {
+						console.log(`[Frontend] Validating georeferencing for ${file.name}`);
+						const formData = new FormData();
+						formData.append('file', file);
+
+						const response = await fetch('/api/validate-map', {
+							method: 'POST',
+							body: formData
+						});
+
+						const result = await response.json();
+						console.log(`[Frontend] Georef validation result for ${file.name}:`, result);
+
+						if (!response.ok || result.error) {
+							// Georeferencing validation failed
+							uploadProgress[progressIndex] = {
+								...uploadProgress[progressIndex],
+								status: 'invalid',
+								error: result.error || result.details || 'Georeferencing validation failed'
+							};
+						} else {
+							// All validations passed
+							uploadProgress[progressIndex] = {
+								...uploadProgress[progressIndex],
+								status: 'valid'
+							};
+						}
+					} catch (error) {
+						console.error(`[Frontend] Georef validation error for ${file.name}:`, error);
+						uploadProgress[progressIndex] = {
+							...uploadProgress[progressIndex],
+							status: 'invalid',
+							error: error instanceof Error ? error.message : 'Failed to validate georeferencing'
+						};
+					}
+
+					// Trigger reactivity
+					uploadProgress = [...uploadProgress];
+				}
+			}
 		} catch (error) {
 			console.error('Validation error:', error);
 			uploadProgress = uploadProgress.map((p) => ({
@@ -180,39 +336,25 @@
 	};
 
 	// Remove a file from the selection
-	const removeFile = async (fileName: string) => {
+	const removeFile = (fileName: string) => {
+		// Remove from selectedFiles
 		selectedFiles = selectedFiles.filter(file => file.name !== fileName);
 
+		// Remove from uploadProgress (preserve validation state for other files)
+		uploadProgress = uploadProgress.filter(p => p.name !== fileName);
+
+		// Remove from validationResults (preserve validation state for other files)
+		validationResults = validationResults.filter(r => r.fileName !== fileName);
+
+		// Remove backend validation error for this file
+		backendValidationErrors.delete(fileName);
+		backendValidationErrors = new Map(backendValidationErrors); // Trigger reactivity
+
+		// If no files remaining, clear all state
 		if (selectedFiles.length === 0) {
 			uploadProgress = [];
 			validationResults = [];
-			return;
-		}
-
-		// Re-validate remaining files
-		uploadProgress = selectedFiles.map((file) => ({
-			name: file.name,
-			status: 'validating' as UploadStatus
-		}));
-
-		isValidating = true;
-		try {
-			validationResults = await validateZipFiles(selectedFiles);
-			uploadProgress = validationResults.map((result) => ({
-				name: result.fileName,
-				status: result.valid ? 'valid' : 'invalid',
-				error: result.error,
-				imagesFound: result.imagesFound
-			}));
-		} catch (error) {
-			console.error('Validation error:', error);
-			uploadProgress = uploadProgress.map((p) => ({
-				...p,
-				status: 'invalid',
-				error: 'Failed to validate file'
-			}));
-		} finally {
-			isValidating = false;
+			backendValidationErrors = new Map();
 		}
 	};
 
@@ -234,17 +376,18 @@
 		}
 
 		isSubmitting = true;
-		uploadProgress = uploadProgress.map((entry) => ({
-			...entry,
-			status: 'uploading'
-		}));
 
 		try {
 			console.log('[Frontend] User state before API call:', user ? 'authenticated' : 'NOT authenticated');
 			console.log('[Frontend] User details:', user);
 
+			// Files are already validated client-side, proceed to upload
+			console.log('[Frontend] Proceeding to upload', selectedFiles.length, 'files (already validated client-side)');
+			const validFiles = selectedFiles;
+
+			// Step 2: Get presigned URLs only for valid files
 			const fileRequests = await Promise.all(
-				selectedFiles.map(async (file) => ({
+				validFiles.map(async (file) => ({
 					name: file.name,
 					size: file.size,
 					type: file.type,
@@ -282,6 +425,12 @@
 					console.log('[Frontend] Received fileErrors:', errorData.fileErrors);
 					console.log('[Frontend] Current uploadProgress filenames:', uploadProgress.map(e => e.name));
 
+					// Store backend errors in separate Map to preserve them across re-validation
+					errorData.fileErrors.forEach((fileError: any) => {
+						backendValidationErrors.set(fileError.fileName, fileError.error);
+					});
+					backendValidationErrors = new Map(backendValidationErrors); // Trigger reactivity
+
 					// Only mark files as error if they're actually in the fileErrors array
 					uploadProgress = uploadProgress.map((entry) => {
 						const fileError = errorData.fileErrors.find((e: any) => e.fileName === entry.name);
@@ -317,6 +466,13 @@
 			// If response contains fileErrors, mark those files as error
 			if (mixedErrors && Array.isArray(mixedErrors)) {
 				console.log('[Frontend] Response includes mixed errors:', mixedErrors);
+
+				// Store backend errors in separate Map to preserve them across re-validation
+				mixedErrors.forEach((fileError: any) => {
+					backendValidationErrors.set(fileError.fileName, fileError.error);
+				});
+				backendValidationErrors = new Map(backendValidationErrors); // Trigger reactivity
+
 				uploadProgress = uploadProgress.map((entry) => {
 					const fileError = mixedErrors.find((e: any) => e.fileName === entry.name);
 					if (fileError) {
@@ -335,7 +491,7 @@
 			if (urls && urls.length > 0) {
 				for (const urlData of urls) {
 					// Find the file by matching the key (sanitized name) to original file
-					const file = selectedFiles.find(f => {
+					const file = validFiles.find(f => {
 						// The urlData.key is the sanitized filename, need to match to original
 						return urlData.metadata.originalFilename === f.name;
 					});
@@ -383,6 +539,7 @@
 				selectedFiles = [];
 				uploadProgress = [];
 				validationResults = [];
+				backendValidationErrors = new Map(); // Clear backend errors on successful upload
 
 				// Auto-refresh recent activity after 2 seconds
 				setTimeout(async () => {
@@ -493,32 +650,97 @@
 		</div>
 	</header>
 
-	<section class="hero">
-		<div class="hero-copy">
-			<h2>Job pipeline overview</h2>
-			<p>
-				Each upload goes through automated validation, processing, and completion.<br />Track system performance and job reliability using the live counters.
-			</p>
-		</div>
-		<div class="hero-stats">
-			<div class="stat-card">
-				<span class="label">Jobs submitted</span>
-				<strong>{stats.total}</strong>
+	{#if user}
+		<section class="hero">
+			<div class="hero-copy">
+				<h2>Job pipeline overview</h2>
+				<p>
+					Each upload goes through automated validation, processing, and completion.<br />Track system performance and job reliability using the live counters.
+				</p>
 			</div>
-			<div class="stat-card">
-				<span class="label">In progress</span>
-				<strong>{stats.active}</strong>
+			<div class="hero-stats">
+				<div class="stat-card">
+					<span class="label">Jobs submitted</span>
+					<strong>{stats.total}</strong>
+				</div>
+				<div class="stat-card">
+					<span class="label">In progress</span>
+					<strong>{stats.active}</strong>
+				</div>
+				<div class="stat-card">
+					<span class="label">Completed</span>
+					<strong>{stats.completed}</strong>
+				</div>
+				<div class="stat-card caution">
+					<span class="label">Failed</span>
+					<strong>{stats.failed}</strong>
+				</div>
 			</div>
-			<div class="stat-card">
-				<span class="label">Completed</span>
-				<strong>{stats.completed}</strong>
+		</section>
+	{:else}
+		<section class="hero-landing">
+			<div class="hero-content">
+				<div class="hero-icon">
+					<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+						<polyline points="7.5 4.21 12 6.81 16.5 4.21"></polyline>
+						<polyline points="7.5 19.79 7.5 14.6 3 12"></polyline>
+						<polyline points="21 12 16.5 14.6 16.5 19.79"></polyline>
+						<polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+						<line x1="12" y1="22.08" x2="12" y2="12"></line>
+					</svg>
+				</div>
+				<h2>Transform Your Mining Maps</h2>
+				<p class="hero-subtitle">
+					Automated processing pipeline for mining map data. Upload your Maps and get processed results.
+				</p>
+				<a class="button primary large" href="/auth/login">
+					<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+						<polyline points="10 17 15 12 10 7"></polyline>
+						<line x1="15" y1="12" x2="3" y2="12"></line>
+					</svg>
+					Sign in to Get Started
+				</a>
 			</div>
-			<div class="stat-card caution">
-				<span class="label">Failed</span>
-				<strong>{stats.failed}</strong>
+
+			<div class="features-grid">
+				<div class="feature-card">
+					<div class="feature-icon">
+						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<polyline points="16 18 22 12 16 6"></polyline>
+							<polyline points="8 6 2 12 8 18"></polyline>
+						</svg>
+					</div>
+					<h3>Automated Processing</h3>
+					<p>Upload your ZIP archives and let our system handle validation, processing, and completion automatically.</p>
+				</div>
+
+				<div class="feature-card">
+					<div class="feature-icon">
+						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<circle cx="12" cy="12" r="10"></circle>
+							<polyline points="12 6 12 12 16 14"></polyline>
+						</svg>
+					</div>
+					<h3>Real-Time Tracking</h3>
+					<p>Monitor your uploads in real time with live status updates and instant notifications when processing completes.</p>
+				</div>
+
+				<div class="feature-card">
+					<div class="feature-icon">
+						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+							<polyline points="7 10 12 15 17 10"></polyline>
+							<line x1="12" y1="15" x2="12" y2="3"></line>
+						</svg>
+					</div>
+					<h3>Instant Downloads</h3>
+					<p>Access your processed map data instantly. Download results directly from your dashboard at any time.</p>
+				</div>
 			</div>
-		</div>
-	</section>
+		</section>
+	{/if}
 
 	{#if user}
 		<section class="grid">
@@ -562,8 +784,10 @@
 												{/if}
 											</span>
 										{/if}
-										{#if item.error && (item.status === 'invalid' || item.status === 'error')}
+										{#if item.error && item.status === 'invalid'}
 											<span class="error-info">{item.error}</span>
+										{:else if item.error && item.status === 'error'}
+											<span class="info-message">{item.error}</span>
 										{/if}
 									</div>
 									<div class="file-actions">
@@ -571,15 +795,19 @@
 											{#if item.status === 'pending'}
 												Queued
 											{:else if item.status === 'validating'}
-												<span class="validating">Validating…</span>
+												<span class="validating">Validating format…</span>
+											{:else if item.status === 'validating-georef'}
+												<span class="validating">Checking coordinates…</span>
 											{:else if item.status === 'valid'}
 												✓ Valid
 											{:else if item.status === 'invalid'}
-												✗ Invalid
+												Invalid
 											{:else if item.status === 'uploading'}
 												Uploading…
 											{:else if item.status === 'done'}
 												Uploaded
+											{:else if item.status === 'error'}
+												Duplicate
 											{:else}
 												Failed
 											{/if}
@@ -606,22 +834,17 @@
 
 					<button
 						type="submit"
-						disabled={isSubmitting || isValidating || selectedFiles.length === 0 || selectedFiles.length > MAX_FILES || !allFilesValid}
+						disabled={isSubmitting || isValidating || selectedFiles.length === 0 || selectedFiles.length > MAX_FILES || !allFilesValid || hasUploadedOrErrorFiles}
 					>
 						{#if isSubmitting}
 							Uploading…
 						{:else if isValidating}
 							Validating…
 						{:else}
-							Upload to S3
+							Submit Maps
 						{/if}
 					</button>
 
-					{#if !allFilesValid && validationResults.length > 0}
-						<p class="validation-warning">
-							⚠️ Some files failed validation. Please remove invalid files before uploading.
-						</p>
-					{/if}
 				</form>
 
 				{#if formState?.error}
@@ -707,7 +930,7 @@
 											{/if}
 										</td>
 										<td>
-											<span class={`status-badge ${statusClass(job.status)}`}>{job.status}</span>
+											<span class={`status-badge ${statusClass(getJobStatus(job))}`}>{getJobStatus(job)}</span>
 										</td>
 										<td>{formatDate(job.createdAt)}</td>
 									</tr>
@@ -995,8 +1218,8 @@
 	.hero {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) minmax(0, 320px);
-		gap: 2rem;
-		padding: 2.5rem;
+		gap: 1.5rem;
+		padding: 1.5rem 2rem;
 		border-radius: 1.3rem;
 		background: var(--hero-background);
 		border: 1px solid var(--hero-border);
@@ -1021,12 +1244,12 @@
 		z-index: 1;
 		display: flex;
 		flex-direction: column;
-		gap: 1rem;
+		gap: 0.5rem;
 	}
 
 	.hero h2 {
 		margin: 0;
-		font-size: 1.9rem;
+		font-size: 1.5rem;
 		font-weight: 700;
 		color: var(--text-primary);
 	}
@@ -1034,7 +1257,8 @@
 	.hero p {
 		margin: 0;
 		color: var(--text-secondary);
-		line-height: 1.65;
+		line-height: 1.5;
+		font-size: 0.9rem;
 	}
 
 	.hero-stats {
@@ -1047,24 +1271,27 @@
 
 	.stat-card {
 		background: var(--panel-background);
-		border-radius: 1rem;
-		padding: 1.2rem;
+		border-radius: 0.85rem;
+		padding: 0.9rem 1rem;
 		border: 1px solid var(--border-subtle);
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: 0.35rem;
 		box-shadow: var(--shadow-elevated);
 	}
 
 	.stat-card .label {
-		font-size: 0.75rem;
+		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: 0.06em;
 		color: var(--text-muted);
+		min-height: 2em;
+		display: flex;
+		align-items: center;
 	}
 
 	.stat-card strong {
-		font-size: 1.8rem;
+		font-size: 1.6rem;
 		font-weight: 700;
 		color: var(--text-primary);
 	}
@@ -1080,6 +1307,128 @@
 
 	.stat-card.caution .label {
 		color: rgba(185, 28, 28, 0.75);
+	}
+
+	/* New Landing Page Styles */
+	.hero-landing {
+		display: flex;
+		flex-direction: column;
+		gap: 3rem;
+		padding: 3rem 2rem;
+		border-radius: 1.3rem;
+		background: var(--hero-background);
+		border: 1px solid var(--hero-border);
+		box-shadow: var(--hero-shadow);
+		backdrop-filter: blur(10px);
+		position: relative;
+		overflow: hidden;
+	}
+
+	.hero-landing::after {
+		content: '';
+		position: absolute;
+		inset: -40% 45% auto -20%;
+		height: 280px;
+		border-radius: 50%;
+		background: radial-gradient(circle, rgba(124, 58, 237, 0.2), transparent 65%);
+		pointer-events: none;
+	}
+
+	.hero-content {
+		position: relative;
+		z-index: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		text-align: center;
+		gap: 1.5rem;
+		max-width: 700px;
+		margin: 0 auto;
+	}
+
+	.hero-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 100px;
+		height: 100px;
+		border-radius: 1.5rem;
+		background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+		color: white;
+		box-shadow: var(--shadow-floating);
+	}
+
+	.hero-content h2 {
+		margin: 0;
+		font-size: 2.5rem;
+		font-weight: 800;
+		color: var(--text-primary);
+		line-height: 1.2;
+	}
+
+	.hero-subtitle {
+		margin: 0;
+		font-size: 1.15rem;
+		color: var(--text-secondary);
+		line-height: 1.6;
+		max-width: 600px;
+	}
+
+	.button.large {
+		padding: 0.9rem 2rem;
+		font-size: 1.05rem;
+		gap: 0.6rem;
+	}
+
+	.features-grid {
+		position: relative;
+		z-index: 1;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+		gap: 1.5rem;
+	}
+
+	.feature-card {
+		background: var(--panel-background);
+		border: 1px solid var(--panel-border);
+		border-radius: 1rem;
+		padding: 2rem;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		box-shadow: var(--shadow-elevated);
+		backdrop-filter: blur(12px);
+		transition: transform 0.3s ease, box-shadow 0.3s ease;
+	}
+
+	.feature-card:hover {
+		transform: translateY(-4px);
+		box-shadow: var(--shadow-floating);
+	}
+
+	.feature-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 56px;
+		height: 56px;
+		border-radius: 0.85rem;
+		background: linear-gradient(135deg, rgba(124, 58, 237, 0.15), rgba(79, 70, 229, 0.15));
+		color: var(--accent-primary);
+	}
+
+	.feature-card h3 {
+		margin: 0;
+		font-size: 1.25rem;
+		font-weight: 700;
+		color: var(--text-primary);
+	}
+
+	.feature-card p {
+		margin: 0;
+		color: var(--text-secondary);
+		line-height: 1.6;
+		font-size: 0.95rem;
 	}
 
 	.panel {
@@ -1238,6 +1587,12 @@
 		font-weight: 600;
 	}
 
+	.info-message {
+		font-size: 0.78rem;
+		color: #2563eb;
+		font-weight: 600;
+	}
+
 	.file-actions {
 		display: flex;
 		align-items: center;
@@ -1278,9 +1633,12 @@
 		display: block;
 	}
 
-	.upload-invalid::before,
-	.upload-error::before {
+	.upload-invalid::before {
 		background: rgba(248, 113, 113, 0.9);
+	}
+
+	.upload-error::before {
+		background: rgba(59, 130, 246, 0.85);
 	}
 
 	.upload-valid::before,
@@ -1297,9 +1655,12 @@
 		background: rgba(234, 179, 8, 0.85);
 	}
 
-	.upload-invalid .status-label,
-	.upload-error .status-label {
+	.upload-invalid .status-label {
 		color: #b91c1c;
+	}
+
+	.upload-error .status-label {
+		color: #2563eb;
 	}
 
 	.upload-valid .status-label,
@@ -1668,6 +2029,33 @@
 		}
 
 		.hero-stats {
+			grid-template-columns: 1fr;
+		}
+
+		.hero-landing {
+			padding: 2.5rem 1.5rem;
+			gap: 2.5rem;
+		}
+
+		.hero-content h2 {
+			font-size: 2rem;
+		}
+
+		.hero-subtitle {
+			font-size: 1rem;
+		}
+
+		.hero-icon {
+			width: 80px;
+			height: 80px;
+		}
+
+		.hero-icon svg {
+			width: 48px;
+			height: 48px;
+		}
+
+		.features-grid {
 			grid-template-columns: 1fr;
 		}
 

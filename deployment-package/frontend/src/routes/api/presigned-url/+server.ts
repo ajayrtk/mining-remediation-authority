@@ -1,6 +1,7 @@
 // Presigned URL API - generates signed URLs for direct S3 uploads
 // Checks for duplicates and handles retry logic for failed uploads
 
+import { parseMapFilename, sanitizeMapFilename } from '$lib/utils/filenameParser';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { QueryCommand } from '@aws-sdk/lib-dynamodb';
@@ -16,36 +17,6 @@ const ALLOWED_MIME = new Set([
 	'application/octet-stream'
 ]);
 
-// Sanitize to standard format: SeamID_SheetNumber.zip
-// Example: "17836_26_9285_UpperHirst.zip" -> "17836_269285.zip"
-const sanitizeName = (name: string) => {
-	const extMatch = name.match(/\.(zip|ZIP)$/i);
-	const ext = extMatch ? extMatch[0] : '.zip';
-	const nameWithoutExt = name.replace(/\.(zip|ZIP)$/i, '');
-
-	const parts = nameWithoutExt.split('_');
-	if (parts.length === 0) {
-		return name;
-	}
-
-	const seamId = parts[0];
-	const remainingParts = parts.slice(1).join('');
-	const digits = remainingParts.replace(/\D/g, '');
-
-	if (digits.length >= 6) {
-		const sheetNumber = digits.substring(0, 6);
-		return `${seamId}_${sheetNumber}${ext}`;
-	}
-
-	// Fallback: couldn't parse properly, just normalize the filename
-	// Remove special characters and multiple underscores
-	const normalized = name
-		.normalize('NFKD')
-		.replace(/[\s]+/g, '_')
-		.replace(/[^a-zA-Z0-9._-]/g, '');
-
-	return normalized.replace(/_+(\.[^.]+)$/, '$1');
-};
 
 // Check if this file was already uploaded and whether we should allow retry
 // This implements the retry logic - COMPLETED files can't be retried,
@@ -93,7 +64,7 @@ const checkMapExists = async (mapId: string): Promise<{
 				// File processed successfully - don't allow retry
 				// This prevents duplicate processing of already successful files
 				canRetry = false;
-				reason = 'File already processed successfully';
+				reason = 'This map was already processed successfully';
 			} else if (status === 'FAILED') {
 				// File failed last time - allow retry
 				// This is the main retry use case
@@ -199,7 +170,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const presignedUrls: PresignedUrlResponse[] = [];
 		const fileErrors: { fileName: string; error: string }[] = [];
 
-		// Process each file in the batch
+		// Phase 1: Validate all files synchronously and collect metadata
+		type ValidatedFile = {
+			file: FileRequest;
+			mapId: string;
+			mapName: string;
+			metadata: {
+				originalFilename: string;
+				submittedBy: string;
+				mapId: string;
+				jobId: string;
+				batchSize: string;
+			};
+		};
+
+		const validatedFiles: ValidatedFile[] = [];
+
 		for (const file of files) {
 			const lowerName = file.name.toLowerCase();
 
@@ -214,35 +200,27 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				continue;
 			}
 
-			// Create unique map ID from file hash (for deduplication)
-			const mapId = `map_${file.hash}`;
-			const mapName = sanitizeName(file.name);
-
-			// Validate that sanitized name is not empty
-			if (!mapName || mapName.trim() === '' || mapName === '.zip') {
+			// Parse and validate filename
+			const parsed = parseMapFilename(file.name);
+			if (!parsed.valid) {
 				fileErrors.push({
 					fileName: file.name,
-					error: `Invalid filename after sanitization - could not parse "${file.name}"`
+					error: parsed.error || 'Invalid filename format'
 				});
 				continue;
 			}
 
-			// Check if this file was already uploaded and handle retry logic
-			const checkResult = await checkMapExists(mapId);
-			if (checkResult.exists && !checkResult.canRetry) {
-				// File exists and we shouldn't retry (either processing or completed)
-				let errorMsg = checkResult.reason || `${file.name} has already been processed`;
-				// If uploaded with a different filename before, mention that
-				if (checkResult.existingName && checkResult.existingName !== file.name) {
-					errorMsg = `${file.name} (same content as previously uploaded "${checkResult.existingName}") - ${checkResult.reason || 'already processed'}`;
-				}
-				fileErrors.push({ fileName: file.name, error: errorMsg });
-				continue;
-			}
+			// Create unique map ID from file hash (for deduplication)
+			const mapId = `map_${file.hash}`;
+			const mapName = sanitizeMapFilename(file.name);
 
-			// If we reach here, either it's a new file or a retry is allowed
-			if (checkResult.exists && checkResult.canRetry) {
-				console.log(`[Retry] Allowing retry for ${file.name} (mapId: ${mapId}, reason: ${checkResult.reason})`);
+			// This should never happen since we already validated, but double-check
+			if (!mapName) {
+				fileErrors.push({
+					fileName: file.name,
+					error: 'Failed to sanitize filename'
+				});
+				continue;
 			}
 
 			// Store metadata that will be passed to the Lambda when the file is uploaded
@@ -254,25 +232,69 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				batchSize: batchSize
 			};
 
-			// Generate presigned URL for direct upload to S3
-			const command = new PutObjectCommand({
-				Bucket: MAP_INPUT_BUCKET,
-				Key: mapName,
-				ContentType: file.type,
-				Metadata: metadata
-			});
-
-			const url = await getSignedUrl(getS3Client(), command, {
-				expiresIn: 3600 // URL expires in 1 hour
-			});
-
-			presignedUrls.push({
-				url,
-				key: mapName,
+			validatedFiles.push({
+				file,
 				mapId,
+				mapName,
 				metadata
 			});
 		}
+
+		// Phase 2: Check for duplicates in parallel (all DynamoDB queries at once)
+		const duplicateCheckResults = await Promise.all(
+			validatedFiles.map(async (vf) => {
+				const checkResult = await checkMapExists(vf.mapId);
+				return { validatedFile: vf, checkResult };
+			})
+		);
+
+		// Phase 3: Process duplicate check results and collect files to upload
+		const filesToUpload: ValidatedFile[] = [];
+
+		for (const { validatedFile, checkResult } of duplicateCheckResults) {
+			if (checkResult.exists && !checkResult.canRetry) {
+				// File exists and we shouldn't retry (either processing or completed)
+				let errorMsg = checkResult.reason || `${validatedFile.file.name} has already been processed`;
+				// If uploaded with a different filename before, mention that
+				if (checkResult.existingName && checkResult.existingName !== validatedFile.file.name) {
+					errorMsg = `${validatedFile.file.name} (same content as previously uploaded "${checkResult.existingName}") - ${checkResult.reason || 'already processed'}`;
+				}
+				fileErrors.push({ fileName: validatedFile.file.name, error: errorMsg });
+				continue;
+			}
+
+			// If we reach here, either it's a new file or a retry is allowed
+			if (checkResult.exists && checkResult.canRetry) {
+				console.log(`[Retry] Allowing retry for ${validatedFile.file.name} (mapId: ${validatedFile.mapId}, reason: ${checkResult.reason})`);
+			}
+
+			filesToUpload.push(validatedFile);
+		}
+
+		// Phase 4: Generate presigned URLs in parallel (all S3 operations at once)
+		const presignedUrlResults = await Promise.all(
+			filesToUpload.map(async (vf) => {
+				const command = new PutObjectCommand({
+					Bucket: MAP_INPUT_BUCKET,
+					Key: vf.mapName,
+					ContentType: vf.file.type,
+					Metadata: vf.metadata
+				});
+
+				const url = await getSignedUrl(getS3Client(), command, {
+					expiresIn: 3600 // URL expires in 1 hour
+				});
+
+				return {
+					url,
+					key: vf.mapName,
+					mapId: vf.mapId,
+					metadata: vf.metadata
+				};
+			})
+		);
+
+		presignedUrls.push(...presignedUrlResults);
 
 		// Figure out what to return based on results
 		const hasErrors = fileErrors.length > 0;

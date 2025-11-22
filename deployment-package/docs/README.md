@@ -172,18 +172,20 @@ A: See [Production Readiness](production-readiness.md) → "Cost Implications"
 | Document | Status | Last Updated |
 |----------|--------|--------------|
 | Deployment Guide | ✅ Up-to-date | 2025-11-06 |
-| Architecture | ✅ Current | 2025-11-06 |
+| Architecture | ✅ Current | 2025-11-14 |
 | Maintenance Guide | ✅ Current | 2025-11-06 |
 | Troubleshooting | ✅ Up-to-date | 2025-11-06 |
 | IAM Configuration | ✅ Current | 2025-11-06 |
 | Production Readiness | ✅ Current | 2025-11-06 |
-| Changelog | ✅ Current | 2025-11-06 |
+| Changelog | ✅ Current | 2025-11-14 |
 
 **Current Infrastructure:**
-- Region: eu-west-1
+- Region: eu-west-2
 - Terraform: >= 1.6.0
 - AWS Provider: >= 5.0
-- Features: IAM role reuse, conditional resources
+- Features: IAM role reuse, conditional resources, auto-refresh UI, performance-optimized ECS
+- ECS Processor: 8 vCPU / 16 GB RAM
+- Frontend: Auto-refresh (10-second interval)
 
 ---
 
@@ -198,5 +200,5 @@ When updating documentation:
 
 ---
 
-**Documentation Version:** 2.0
-**Last Updated:** 2025-11-06
+**Documentation Version:** 2.1
+**Last Updated:** 2025-11-14

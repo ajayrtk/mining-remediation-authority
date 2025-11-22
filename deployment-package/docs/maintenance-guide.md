@@ -47,6 +47,42 @@ echo "Region: $REGION"
 
 ## Daily Operations
 
+### Frontend Features
+
+#### Auto-Refresh (Added 2025-11-14)
+
+The frontend now includes automatic data refresh functionality:
+
+**Enabled Pages:**
+- `/` - Dashboard with Recent Job Activity and Job Pipeline Overview (10-second interval)
+- `/maps` - All Maps table view (10-second interval)
+
+**Behavior:**
+- Automatically starts when user is authenticated
+- Automatically stops when user logs out
+- Properly cleans up on page navigation
+- Uses SvelteKit's `invalidateAll()` for efficient data fetching
+
+**User Experience:**
+- No manual refresh needed to see job status updates
+- Real-time visibility into processing pipeline
+- Seamless updates without page reload
+
+**Configuration:**
+To modify the refresh interval, edit the frontend source files:
+- Dashboard: `frontend/src/routes/+page.svelte` (line ~10)
+- Maps page: `frontend/src/routes/maps/+page.svelte` (line ~10)
+
+```typescript
+const AUTO_REFRESH_INTERVAL = 10000; // Change to desired milliseconds
+```
+
+After changes, redeploy the frontend:
+```bash
+cd frontend
+./build_and_push.sh
+```
+
 ### Health Checks
 
 Perform these checks daily or set up automated monitoring:
@@ -528,6 +564,8 @@ resource "aws_appautoscaling_policy" "ecs_policy" {
 
 ### Increase ECS Task Resources
 
+#### Frontend Task Resources
+
 Edit `terraform.tfvars`:
 ```hcl
 # Increase CPU/Memory
@@ -542,6 +580,51 @@ terraform apply
 ```
 
 **Cost impact**: ~$15/month increase
+
+#### Map Processor Task Resources
+
+**Current Configuration** (as of 2025-11-14):
+- CPU: 8192 units (8 vCPU)
+- Memory: 16384 MB (16 GB)
+
+Edit `infra/ecs.tf` (lines 153-154):
+```hcl
+resource "aws_ecs_task_definition" "processor" {
+  # ... other settings ...
+  cpu                      = "8192"  # 8 vCPU
+  memory                   = "16384"  # 16 GB
+  # ... rest of config ...
+}
+```
+
+**Available Fargate configurations:**
+| CPU (vCPU) | Memory Options (GB) | Use Case | Est. Cost/Hour |
+|------------|---------------------|----------|----------------|
+| 0.25 | 0.5, 1, 2 | Testing only | $0.01 |
+| 0.5 | 1, 2, 3, 4 | Light processing | $0.02 |
+| 1 | 2, 3, 4, 5, 6, 7, 8 | Small maps | $0.04 |
+| 2 | 4-16 | Medium maps | $0.08 |
+| 4 | 8-30 | Previous config | $0.16 |
+| 8 | 16-60 | **Current config** | $0.32 |
+| 16 | 32-120 | Very large maps | $0.64 |
+
+**Performance vs Cost Trade-off:**
+```
+4 vCPU / 8 GB  → 12 min processing → $0.032 per job
+8 vCPU / 16 GB → ~7 min processing → $0.037 per job (CURRENT)
+16 vCPU / 32 GB → ~4 min processing → $0.043 per job
+```
+
+Apply changes:
+```bash
+cd infra
+terraform apply -auto-approve
+```
+
+**Important**: Processor tasks are on-demand (only run during processing), so cost impact depends on usage:
+- Low usage (10 maps/day): ~$2-5/month
+- Medium usage (50 maps/day): ~$10-20/month
+- High usage (200 maps/day): ~$40-80/month
 
 ### DynamoDB Capacity
 

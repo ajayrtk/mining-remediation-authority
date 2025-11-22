@@ -26,6 +26,57 @@ def truncate(value: str, limit: int = 500) -> str:
     return value[:limit] if value else ""
 
 
+def sync_map_status(job_id: str, new_status: str) -> None:
+    """
+    Synchronize map statuses with job status
+    Updates all maps belonging to a job to match the job's current status
+    This ensures consistency between map-jobs table and maps table
+    """
+    if not (MAPS_TABLE_NAME and job_id):
+        return
+
+    try:
+        # Query all maps belonging to this job using the JobIdIndex GSI
+        response = dynamo.query(
+            TableName=MAPS_TABLE_NAME,
+            IndexName="JobIdIndex",
+            KeyConditionExpression="jobId = :jobId",
+            ExpressionAttributeValues={
+                ":jobId": {"S": job_id}
+            }
+        )
+
+        maps = response.get("Items", [])
+        timestamp = iso_timestamp()
+
+        # Update each map's status to match the job status
+        for map_item in maps:
+            map_id = map_item.get("mapId", {}).get("S")
+            map_name = map_item.get("mapName", {}).get("S")
+
+            if map_id and map_name:
+                try:
+                    dynamo.update_item(
+                        TableName=MAPS_TABLE_NAME,
+                        Key={
+                            "mapId": {"S": map_id},
+                            "mapName": {"S": map_name}
+                        },
+                        UpdateExpression="SET #status = :status, updatedAt = :updated",
+                        ExpressionAttributeNames={"#status": "status"},
+                        ExpressionAttributeValues={
+                            ":status": {"S": new_status},
+                            ":updated": {"S": timestamp}
+                        }
+                    )
+                    logger.info(f"Synced map {map_id}/{map_name} status to {new_status}")
+                except ClientError as exc:
+                    logger.exception(f"Failed to sync map status for {map_id}/{map_name}", extra={"error": str(exc)})
+
+    except ClientError as exc:
+        logger.exception(f"Failed to query maps for job {job_id}", extra={"error": str(exc)})
+
+
 def increment_processed_count(job_id: str) -> dict:
     """Increment processedCount and return updated job info"""
     if not TABLE_NAME or not job_id:
@@ -35,9 +86,10 @@ def increment_processed_count(job_id: str) -> dict:
         response = dynamo.update_item(
             TableName=TABLE_NAME,
             Key={"jobId": {"S": job_id}},
-            UpdateExpression="SET processedCount = processedCount + :inc, updatedAt = :updated",
+            UpdateExpression="SET processedCount = if_not_exists(processedCount, :zero) + :inc, updatedAt = :updated",
             ExpressionAttributeValues={
                 ":inc": {"N": "1"},
+                ":zero": {"N": "0"},
                 ":updated": {"S": iso_timestamp()}
             },
             ReturnValues="ALL_NEW"
@@ -45,12 +97,12 @@ def increment_processed_count(job_id: str) -> dict:
 
         attrs = response.get("Attributes", {})
         processed = int(attrs.get("processedCount", {}).get("N", "0"))
-        batch_size = int(attrs.get("batchSize", {}).get("N", "1"))
+        batch_size = int(attrs.get("batchSize", {}).get("N", "0"))
 
         logger.info(f"Job {job_id}: processed {processed}/{batch_size} maps")
 
-        # Check if all maps are processed
-        if processed >= batch_size:
+        # Check if all maps are processed (only if batchSize is known)
+        if batch_size > 0 and processed >= batch_size:
             logger.info(f"All maps processed for job {job_id}, marking as COMPLETED")
             dynamo.update_item(
                 TableName=TABLE_NAME,
@@ -62,6 +114,8 @@ def increment_processed_count(job_id: str) -> dict:
                     ":updated": {"S": iso_timestamp()}
                 }
             )
+            # NOTE: Removed sync_map_status() - individual maps maintain their own statuses
+            # Maps are updated to COMPLETED individually by update_map_output() when they finish processing
 
         return {"processed": processed, "batchSize": batch_size}
     except ClientError as e:
@@ -133,7 +187,7 @@ def lambda_handler(event, _context):
     logger.info(f"Processing S3 copy for job {job_id}, map {map_id}/{map_name}: {source_bucket}/{source_key}")
 
     try:
-        # Update status to PROCESSING
+        # Update job status to PROCESSING
         dynamo.update_item(
             TableName=TABLE_NAME,
             Key={"jobId": {"S": job_id}},
@@ -143,6 +197,23 @@ def lambda_handler(event, _context):
                 ":status": {"S": "PROCESSING"}
             },
         )
+
+        # Update THIS specific map's status to PROCESSING
+        if MAPS_TABLE_NAME:
+            dynamo.update_item(
+                TableName=MAPS_TABLE_NAME,
+                Key={
+                    "mapId": {"S": map_id},
+                    "mapName": {"S": map_name}
+                },
+                UpdateExpression="SET #status = :status, updatedAt = :updated",
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues={
+                    ":status": {"S": "PROCESSING"},
+                    ":updated": {"S": iso_timestamp()}
+                }
+            )
+            logger.info(f"Updated map {map_id}/{map_name} status to PROCESSING")
 
         # Generate output key - add "-output" before extension
         # Example: myfile.zip -> myfile-output.zip
@@ -200,6 +271,8 @@ def lambda_handler(event, _context):
                     ":failed": {"S": "FAILED"}
                 },
             )
+            # NOTE: Removed sync_map_status() - individual maps maintain their own statuses
+            # This specific map will be marked FAILED by the error handling above
         except ClientError:
             logger.exception("Failed to update DynamoDB with failure status")
 
@@ -226,6 +299,8 @@ def lambda_handler(event, _context):
                     ":failed": {"S": "FAILED"}
                 },
             )
+            # NOTE: Removed sync_map_status() - individual maps maintain their own statuses
+            # This specific map will be marked FAILED by the error handling above
         except ClientError:
             logger.exception("Failed to update DynamoDB with failure status")
 

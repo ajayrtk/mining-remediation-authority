@@ -2,6 +2,7 @@ import { S3Client } from '@aws-sdk/client-s3';
 import { env } from '$env/dynamic/private';
 
 export const MAP_INPUT_BUCKET = env.MAP_INPUT_BUCKET ?? 'map-input';
+export const MAP_OUTPUT_BUCKET = env.MAP_OUTPUT_BUCKET ?? 'map-output';
 
 // Create client lazily to ensure env vars are loaded
 let _s3Client: S3Client | null = null;

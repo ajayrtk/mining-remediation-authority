@@ -4,6 +4,8 @@
  * Also validates filename format, sheet numbers, and georeferencing files
  */
 
+import { parseMapFilename } from './filenameParser';
+
 export type ValidationResult = {
 	valid: boolean;
 	fileName: string;
@@ -18,41 +20,6 @@ export type ValidationResult = {
 	missingWorldFiles?: string[];
 };
 
-/**
- * Parse filename to extract SeamID and SheetNumber
- * Expected formats:
- * - SeamID_XXXXXX.zip (e.g., D723_433857.zip)
- * - SeamID_XX_XXXX.zip (e.g., D723_43_3857.zip)
- * Sheet number must be exactly 6 digits (with or without separator)
- */
-function parseMapFilename(filename: string): { seamId: string; sheetNumber: string } | null {
-	// Remove extension
-	const nameWithoutExt = filename.replace(/\.(zip|jpg|jpeg|tif|tiff)$/i, '');
-
-	if (!nameWithoutExt.includes('_')) {
-		return null;
-	}
-
-	// Get seam ID (everything before first underscore) - no restrictions on format/length
-	const seamId = nameWithoutExt.split('_')[0].toUpperCase();
-
-	// Find 6-digit sheet number with optional separators (underscore, hyphen, or space)
-	// Supports formats: XXXXXX, XX_XXXX, XX-XXXX, XX XXXX
-	// Try to match either 6 consecutive digits OR 2 digits + separator + 4 digits
-	const match = nameWithoutExt.match(/(?<!\d)(\d{6}|\d{2}[-\s_]\d{4})(?=\D|$)/);
-	if (!match) {
-		return null;
-	}
-
-	// Extract just the digits
-	const sheetNumber = match[0].replace(/\D/g, '');
-
-	if (sheetNumber.length !== 6) {
-		return null;
-	}
-
-	return { seamId, sheetNumber };
-}
 
 /**
  * Check if a filename is a valid image file
@@ -122,8 +89,8 @@ export async function validateZipFile(file: File): Promise<ValidationResult> {
 
 	// Validate ZIP filename format (SeamID_SheetNumber.zip)
 	const zipFilenameInfo = parseMapFilename(file.name);
-	if (!zipFilenameInfo) {
-		result.error = 'Invalid ZIP filename format. File name must follow the pattern: SeamID_SheetNumber.zip where SeamID can be any alphanumeric value and SheetNumber is exactly 6 digits (e.g., 16287_453465.zip or D723_43_3857.zip)';
+	if (!zipFilenameInfo.valid) {
+		result.error = zipFilenameInfo.error || 'Invalid ZIP filename format';
 		return result;
 	}
 
@@ -208,8 +175,8 @@ export async function validateZipFile(file: File): Promise<ValidationResult> {
 			const imageFileName = image.name.split('/').pop() || image.name;
 			const imageFileInfo = parseMapFilename(imageFileName);
 
-			if (!imageFileInfo) {
-				result.error = `Invalid image filename: ${imageFileName}. File name must follow the pattern: SeamID_SheetNumber.ext where SheetNumber is exactly 6 digits (e.g., 16287_453465.jpg)`;
+			if (!imageFileInfo.valid) {
+				result.error = `Invalid image filename: ${imageFileName}. ${imageFileInfo.error}`;
 				return result;
 			}
 
