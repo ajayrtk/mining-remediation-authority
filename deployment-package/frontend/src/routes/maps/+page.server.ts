@@ -59,7 +59,7 @@ const fetchMaps = async (limit: number = 50, lastKey?: any): Promise<{ maps: Map
 			lastEvaluatedKey: result.LastEvaluatedKey
 		};
 	} catch (error) {
-		console.error('Failed to fetch maps from DynamoDB', error);
+		console.error('[maps] Failed to fetch maps from DynamoDB:', error);
 		return { maps: [] };
 	}
 };

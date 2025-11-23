@@ -113,7 +113,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			message: 'Map retry initiated successfully'
 		});
 	} catch (error) {
-		console.error('Retry map error:', error);
+		console.error('[retry-map] Failed to retry map:', error);
 		return json(
 			{
 				error: 'Failed to retry map',

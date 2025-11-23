@@ -14,14 +14,8 @@ const cookieOptions = () => ({
 });
 
 export const handle: Handle = async ({ event, resolve }) => {
-	console.log('[Hooks] Processing request:', event.url.pathname);
 	const sessionId = event.cookies.get(SESSION_COOKIE);
-	console.log('[Hooks] Session cookie present:', !!sessionId);
-	if (sessionId) {
-		console.log('[Hooks] Session ID:', sessionId.substring(0, 10) + '...');
-	}
 	let session = sessionId ? getSession(sessionId) : null;
-	console.log('[Hooks] Session found in store:', !!session);
 	let sessionWasUpdated = false;
 	let sessionWasCleared = false;
 
@@ -40,7 +34,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 				};
 				sessionWasUpdated = true;
 			} catch (err) {
-				console.error('Failed to refresh Cognito session', err);
+				console.error('[hooks] Failed to refresh Cognito session:', err);
 				session = null;
 				sessionWasCleared = true;
 			}
@@ -51,7 +45,6 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 
 	event.locals.user = session?.user ?? null;
-	console.log('[Hooks] User set in locals:', !!event.locals.user);
 
 	const response = await resolve(event);
 

@@ -1,0 +1,41 @@
+# System files
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules
+
+# Build output
+/build
+/.svelte-kit
+/package
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python

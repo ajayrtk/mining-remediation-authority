@@ -27,7 +27,6 @@ ecs_client = boto3.client("ecs")
 # These are set by Terraform when deploying the Lambda
 TABLE_NAME = os.getenv("JOBS_TABLE_NAME")  # DynamoDB table for tracking jobs
 MAPS_TABLE_NAME = os.getenv("MAPS_TABLE_NAME")  # DynamoDB table for individual maps
-MOCK_FUNCTION = os.getenv("MOCK_ECS_FUNCTION_NAME")  # Not used currently
 S3_COPY_FUNCTION = os.getenv("S3_COPY_FUNCTION_NAME")  # Fallback Lambda processor
 ECS_CLUSTER = os.getenv("ECS_CLUSTER")  # ECS cluster name
 ECS_TASK_DEFINITION = os.getenv("ECS_TASK_DEFINITION")  # Task definition for processing

@@ -34,7 +34,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 		return json({ url });
 	} catch (error) {
-		console.error('Failed to generate presigned download URL', error);
+		console.error('[download-url] Failed to generate presigned URL:', error);
 		return json({ error: 'Failed to generate download URL. Please try again.' }, { status: 500 });
 	}
 };
