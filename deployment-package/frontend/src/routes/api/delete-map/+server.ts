@@ -4,11 +4,27 @@ import { dynamoDocClient, MAPS_TABLE, MAP_JOBS_TABLE } from '$lib/server/dynamo'
 import { s3Client, MAP_INPUT_BUCKET, MAP_OUTPUT_BUCKET } from '$lib/server/s3';
 import { DeleteCommand, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { AuditLog } from '$lib/server/audit-log';
+import { ApiErrors, successResponse } from '$lib/server/api-response';
+import { checkRateLimit, RateLimitPresets } from '$lib/server/rate-limit';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
+	const correlationId = locals.correlationId;
+
 	// Check authentication
 	if (!locals.user) {
-		return json({ error: 'Please sign in to delete maps' }, { status: 401 });
+		AuditLog.unauthorizedAccess(undefined, 'delete_map');
+		return ApiErrors.unauthorized('Please sign in to delete maps', { correlationId });
+	}
+
+	// Rate limiting - prevent abuse of delete operations
+	const rateLimitResult = checkRateLimit(locals.user.email, RateLimitPresets.STANDARD);
+	if (!rateLimitResult.allowed) {
+		return ApiErrors.tooManyRequests(
+			'Too many delete requests. Please try again later.',
+			rateLimitResult.resetTime,
+			{ correlationId }
+		);
 	}
 
 	try {
@@ -16,7 +32,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 		// Validate input
 		if (!mapId || !mapName) {
-			return json({ error: 'mapId and mapName are required' }, { status: 400 });
+			return ApiErrors.badRequest('mapId and mapName are required', {
+				correlationId,
+				fieldErrors: {
+					...(!mapId && { mapId: 'Map ID is required' }),
+					...(!mapName && { mapName: 'Map name is required' })
+				}
+			});
 		}
 
 		// Get the map record to verify ownership and get S3 details
@@ -31,21 +53,28 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 		// Check if map exists
 		if (!map) {
-			return json({ error: 'Map not found' }, { status: 404 });
+			return ApiErrors.notFound('Map not found', {
+				correlationId,
+				details: `No map found with ID ${mapId} and name ${mapName}`
+			});
 		}
 
 		// Verify ownership
 		if (map.ownerEmail !== locals.user.email) {
-			return json({ error: 'You can only delete your own maps' }, { status: 403 });
+			AuditLog.forbiddenAccess(locals.user.email, mapId, 'delete_map', { mapName });
+			return ApiErrors.forbidden('You can only delete your own maps', {
+				correlationId,
+				details: `Map ${mapId} belongs to a different user`
+			});
 		}
 
 		// Prevent deletion of maps that are currently processing (check both status and job status if available)
 		const mapStatus = map.status || map.jobStatus;
 		if (mapStatus === 'PROCESSING' || mapStatus === 'DISPATCHED' || mapStatus === 'QUEUED') {
-			return json(
-				{ error: 'Cannot delete map while it is queued or being processed' },
-				{ status: 409 }
-			);
+			return ApiErrors.conflict('Cannot delete map while it is queued or being processed', {
+				correlationId,
+				details: `Current map status: ${mapStatus}`
+			});
 		}
 
 		const deletedItems: string[] = [];
@@ -65,41 +94,60 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		// 2. Check if this was the last map for this job (cascade delete)
 		if (jobId && MAP_JOBS_TABLE) {
 			try {
-				console.log(`[delete-map] Checking cascade delete for job ${jobId} after deleting ${mapName}`);
+				// Query for remaining maps with retry for eventual consistency
+				// GSI updates may not be immediately visible, so we retry with exponential backoff
+				let remainingCount = -1;
+				let retryAttempt = 0;
+				const maxRetries = 3;
 
-				// Add a small delay to allow GSI to catch up (eventual consistency)
-				// This reduces (but doesn't eliminate) race conditions with GSI updates
-				await new Promise(resolve => setTimeout(resolve, 100));
+				while (retryAttempt < maxRetries) {
+					// Exponential backoff: 0ms, 200ms, 400ms
+					if (retryAttempt > 0) {
+						await new Promise(resolve => setTimeout(resolve, retryAttempt * 200));
+					}
 
-				// Query for remaining maps with this jobId
-				const remainingMapsResult = await dynamoDocClient.send(
-					new QueryCommand({
-						TableName: MAPS_TABLE,
-						IndexName: 'JobIdIndex',
-						KeyConditionExpression: 'jobId = :jobId',
-						ExpressionAttributeValues: {
-							':jobId': jobId
-						},
-						Select: 'COUNT'
-					})
-				);
-
-				const remainingCount = remainingMapsResult.Count ?? 0;
-				console.log(`[delete-map] Job ${jobId} has ${remainingCount} remaining maps`);
-
-				// If no maps remain for this job, delete the job record
-				if (remainingCount === 0) {
-					console.log(`[delete-map] Attempting to delete job ${jobId} (cascade delete)`);
-					await dynamoDocClient.send(
-						new DeleteCommand({
-							TableName: MAP_JOBS_TABLE,
-							Key: { jobId }
+					const remainingMapsResult = await dynamoDocClient.send(
+						new QueryCommand({
+							TableName: MAPS_TABLE,
+							IndexName: 'JobIdIndex',
+							KeyConditionExpression: 'jobId = :jobId',
+							ExpressionAttributeValues: {
+								':jobId': jobId
+							},
+							Select: 'COUNT',
+							// Use consistent read if possible, though GSI doesn't support it
+							// This is best effort - eventual consistency is inherent to GSI
 						})
 					);
-					deletedItems.push('DynamoDB job record (cascade delete)');
-					console.log(`[delete-map] Successfully cascade deleted job ${jobId} - no maps remaining`);
-				} else {
-					console.log(`[delete-map] Skipping cascade delete for job ${jobId} - still has ${remainingCount} maps`);
+
+					remainingCount = remainingMapsResult.Count ?? 0;
+
+					// If we found maps, no need to retry
+					if (remainingCount > 0) {
+						break;
+					}
+
+					retryAttempt++;
+				}
+
+				// If no maps remain after retries, delete the job record
+				// Use conditional delete to avoid deleting if maps were added concurrently
+				if (remainingCount === 0) {
+					try {
+						await dynamoDocClient.send(
+							new DeleteCommand({
+								TableName: MAP_JOBS_TABLE,
+								Key: { jobId }
+								// Note: Could add ConditionExpression here to check processedCount/batchSize
+								// but that would require fetching the job first
+							})
+						);
+						deletedItems.push('DynamoDB job record (cascade delete)');
+					} catch (deleteError) {
+						// Job may have been deleted by another concurrent operation
+						// or may have new maps added - this is acceptable
+						console.error('[delete-map] Job delete skipped (may have concurrent changes):', deleteError);
+					}
 				}
 			} catch (error) {
 				console.error('[delete-map] Failed to cascade delete job:', error);
@@ -119,7 +167,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			);
 			deletedItems.push('S3 input file');
 		} catch (error) {
-			console.error('Failed to delete S3 input file:', error);
+			console.error('[delete-map] Failed to delete S3 input file:', error);
 			// Continue even if this fails - lifecycle policy will clean up after 5 days
 		}
 
@@ -134,25 +182,29 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				);
 				deletedItems.push('S3 output file');
 			} catch (error) {
-				console.error('Failed to delete S3 output file:', error);
+				console.error('[delete-map] Failed to delete S3 output file:', error);
 				// Continue even if this fails
 			}
 		}
 
-		return json({
+		// Log successful deletion
+		AuditLog.deleteSuccess(locals.user.email, mapId, {
+			mapName,
+			deletedItems,
+			jobId
+		});
+
+		return successResponse({
 			success: true,
 			mapId,
 			mapName,
 			deletedItems
 		});
 	} catch (error) {
-		console.error('Delete map error:', error);
-		return json(
-			{
-				error: 'Failed to delete map',
-				details: error instanceof Error ? error.message : 'Unknown error'
-			},
-			{ status: 500 }
-		);
+		console.error('[delete-map] Delete map error:', error);
+		return ApiErrors.internalError('Failed to delete map', {
+			correlationId,
+			details: error instanceof Error ? error.message : 'Unknown error'
+		});
 	}
 };

@@ -21,15 +21,14 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Install Python3 for map validation
+# Required by /api/validate-map endpoint which spawns python3 subprocess
 RUN apk add --no-cache python3
 
 # Copy built application from builder
 COPY --from=builder /app/build ./build
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
-
-# Copy validation script
-COPY validate_map.py ./
+COPY --from=builder /app/validate_map.py ./
 
 # Expose port
 EXPOSE 3000

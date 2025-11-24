@@ -40,20 +40,24 @@ def iso_timestamp() -> str:
     return datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
 
 
-# Truncate strings to avoid DynamoDB size limits
-def truncate(value: str, limit: int = 500) -> str:
-    return value[:limit] if value else ""
-
-
 def validate_filename(filename: str) -> tuple[bool, str, str, str]:
     """
-    Validate map filename format - Lambda-level enforcement
-    Catches files that bypass frontend validation (e.g., direct S3 uploads)
+    Validate map filename format - Lambda-level enforcement (backend validation)
+    Catches files that bypass frontend validation (e.g., direct S3 uploads, API calls)
+
+    IMPORTANT: This validation logic is intentionally duplicated from the frontend
+    (frontend/src/lib/utils/filenameParser.ts:parseMapFilename) for defense-in-depth security.
+    Frontend validation provides immediate user feedback, while this Lambda validation
+    provides security enforcement and catches files uploaded outside the normal flow.
+
+    When modifying validation rules, update BOTH locations to maintain consistency.
 
     Format: SeamID_SheetNumber[_optional_suffix].zip
-    - SeamID: MANDATORY, non-empty alphanumeric (before first underscore)
+    - SeamID: MANDATORY, non-empty alphanumeric (everything before sheet number pattern)
     - Underscore: MANDATORY separator
     - SheetNumber: MANDATORY, exactly 6 digits in format XXXXXX or XX_XXXX
+
+    The parser finds the 6-digit sheet number pattern first, then treats everything before it as the seam ID.
 
     Returns: (is_valid, seam_id, sheet_number, error_message)
     """
@@ -66,62 +70,93 @@ def validate_filename(filename: str) -> tuple[bool, str, str, str]:
     if '_' not in name_without_ext:
         return False, '', '', f"Missing mandatory underscore separator. Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip')"
 
-    # Split at first underscore only
-    first_underscore_idx = name_without_ext.index('_')
-    seam_id = name_without_ext[:first_underscore_idx]
-    after_seam_id = name_without_ext[first_underscore_idx + 1:]
+    # Look for 6-digit sheet number pattern in two formats:
+    # Format 1: XX_XXXX (2 digits + separator + 4 digits)
+    # Format 2: XXXXXX (6 consecutive digits)
+    # Use regex with negative lookbehind to ensure pattern isn't preceded by digits
+    sheet_number_pattern = r'(?<!\d)(\d{2}[-\s_]\d{4}|\d{6})(?=[-\s_]|$)'
+    match = re.search(sheet_number_pattern, name_without_ext)
 
-    # Validate seam ID exists and is non-empty
-    if not seam_id or seam_id.strip() == '':
+    if not match:
+        # No valid sheet number pattern found
+        all_digits = re.sub(r'\D', '', name_without_ext)
+        if len(all_digits) == 0:
+            return False, '', '', f"No digits found. Sheet number must be exactly 6 digits in format XXXXXX or XX_XXXX."
+        elif len(all_digits) < 6:
+            return False, '', '', f"Sheet number must be exactly 6 digits, found {len(all_digits)} digits. Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip' or '43_43_3857.zip')"
+        else:
+            return False, '', '', f"Found {len(all_digits)} digits but sheet number format is incorrect. Expected 6 digits in format XXXXXX or XX_XXXX (e.g., '433857' or '43_3857')."
+
+    # Extract sheet number (remove any separators to get 6 digits)
+    sheet_number_raw = match.group(1)
+    sheet_number = re.sub(r'\D', '', sheet_number_raw)
+
+    # Everything before the sheet number pattern is the seam ID
+    sheet_number_start_index = match.start()
+    seam_id = name_without_ext[:sheet_number_start_index]
+
+    # Validate seam ID exists and ends with underscore
+    if not seam_id or not seam_id.endswith('_'):
+        return False, '', '', f"Missing mandatory seam ID before sheet number. Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip')"
+
+    # Remove trailing underscore from seam ID
+    seam_id_clean = seam_id[:-1]
+
+    # Validate seam ID is not empty after removing underscore
+    if not seam_id_clean or seam_id_clean.strip() == '':
         return False, '', '', f"Missing mandatory seam ID before underscore. Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip')"
 
     # Validate seam ID contains only alphanumeric characters
-    if not re.match(r'^[a-zA-Z0-9]+$', seam_id):
-        return False, seam_id, '', f"Invalid seam ID '{seam_id}'. Seam ID must contain only letters and numbers."
+    if not re.match(r'^[a-zA-Z0-9]+$', seam_id_clean):
+        return False, seam_id_clean, '', f"Invalid seam ID '{seam_id_clean}'. Seam ID must contain only letters and numbers."
 
-    # Check if sheet number part exists
-    if not after_seam_id or after_seam_id.strip() == '':
-        return False, seam_id, '', f"Missing sheet number after underscore. Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip')"
-
-    # Try format 1: 2 digits + separator + 4 digits (e.g., 43_3857)
-    format1_match = re.match(r'^(\d{2})[-\s_](\d{4})(?:[-\s_]|$)', after_seam_id)
-    if format1_match:
-        sheet_number = format1_match.group(1) + format1_match.group(2)
-        return True, seam_id, sheet_number, ''
-
-    # Try format 2: 6 consecutive digits (e.g., 433857)
-    format2_match = re.match(r'^(\d{6})(?:[-\s_]|$)', after_seam_id)
-    if format2_match:
-        sheet_number = format2_match.group(1)
-        return True, seam_id, sheet_number, ''
-
-    # If we get here, no valid 6-digit pattern was found
-    # Count digits for better error message
-    all_digits = re.sub(r'\D', '', after_seam_id)
-
-    if len(all_digits) == 0:
-        return False, seam_id, '', f"No digits found in sheet number part. Sheet number must be exactly 6 digits."
-    elif len(all_digits) < 6:
-        return False, seam_id, '', f"Sheet number must be exactly 6 digits, found {len(all_digits)} digits. Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip' or '16516_43_3857.zip')"
-    elif len(all_digits) > 6:
-        return False, seam_id, '', f"Sheet number has too many digits ({len(all_digits)}). First 6 digits must be at the start after seam ID, format: XXXXXX or XX_XXXX."
-    else:
-        # Exactly 6 digits but not at the start
-        return False, seam_id, '', f"Sheet number format is incorrect. Expected 6 digits immediately after first underscore in format XXXXXX or XX_XXXX. Valid examples: '16516_433857.zip' or '16516_43_3857.zip'"
+    return True, seam_id_clean, sheet_number, ''
 
 
 def get_s3_metadata(bucket: str, key: str) -> dict:
     """
-    Retrieve metadata from the uploaded S3 object
+    Retrieve metadata from the uploaded S3 object.
     The frontend sets metadata when generating presigned URLs (jobId, mapId, submittedBy, etc.)
-    This metadata tells us how to process the file and track it in DynamoDB
+    This metadata tells us how to process the file and track it in DynamoDB.
+
+    Returns: dict of metadata if object exists
+    Raises:
+        - ClientError with 404 if object doesn't exist
+        - ClientError for other S3 errors (permission denied, etc.)
     """
     try:
         response = s3_client.head_object(Bucket=bucket, Key=key)
-        return response.get("Metadata", {})
+        metadata = response.get("Metadata", {})
+
+        # Log warning if metadata is empty - could indicate issue with presigned URL generation
+        if not metadata:
+            logging.warning(
+                f"S3 object has no metadata - file may not have been uploaded via presigned URL",
+                extra={"bucket": bucket, "key": key}
+            )
+
+        return metadata
     except ClientError as exc:
-        logging.exception("Failed to retrieve S3 metadata", extra={"bucket": bucket, "key": key})
-        return {}  # Return empty dict if we can't get metadata
+        error_code = exc.response.get("Error", {}).get("Code", "Unknown")
+
+        if error_code == "404" or error_code == "NoSuchKey":
+            logging.error(
+                f"S3 object not found: {bucket}/{key}",
+                extra={"bucket": bucket, "key": key, "error_code": error_code}
+            )
+            raise  # Re-raise to let caller handle missing object
+        elif error_code == "403" or error_code == "AccessDenied":
+            logging.error(
+                f"Access denied to S3 object: {bucket}/{key}",
+                extra={"bucket": bucket, "key": key, "error_code": error_code}
+            )
+            raise  # Re-raise to let caller handle permission issue
+        else:
+            logging.exception(
+                "Unexpected error retrieving S3 metadata",
+                extra={"bucket": bucket, "key": key, "error_code": error_code}
+            )
+            raise  # Re-raise to let caller handle unexpected errors
 
 
 def create_map_entry(map_id: str, map_name: str, owner_email: str, size_bytes: int, timestamp: str, job_id: str) -> None:
@@ -232,57 +267,6 @@ def create_or_get_job(job_id: str, submitted_by: str, timestamp: str, batch_size
             raise
 
 
-def sync_map_status(job_id: str, new_status: str) -> None:
-    """
-    Synchronize map statuses with job status
-    Updates all maps belonging to a job to match the job's current status
-    This ensures consistency between map-jobs table and maps table
-    """
-    if not (MAPS_TABLE_NAME and job_id):
-        return
-
-    try:
-        # Query all maps belonging to this job using the JobIdIndex GSI
-        response = dynamo.query(
-            TableName=MAPS_TABLE_NAME,
-            IndexName="JobIdIndex",
-            KeyConditionExpression="jobId = :jobId",
-            ExpressionAttributeValues={
-                ":jobId": {"S": job_id}
-            }
-        )
-
-        maps = response.get("Items", [])
-        timestamp = iso_timestamp()
-
-        # Update each map's status to match the job status
-        for map_item in maps:
-            map_id = map_item.get("mapId", {}).get("S")
-            map_name = map_item.get("mapName", {}).get("S")
-
-            if map_id and map_name:
-                try:
-                    dynamo.update_item(
-                        TableName=MAPS_TABLE_NAME,
-                        Key={
-                            "mapId": {"S": map_id},
-                            "mapName": {"S": map_name}
-                        },
-                        UpdateExpression="SET #status = :status, updatedAt = :updated",
-                        ExpressionAttributeNames={"#status": "status"},
-                        ExpressionAttributeValues={
-                            ":status": {"S": new_status},
-                            ":updated": {"S": timestamp}
-                        }
-                    )
-                    logging.info(f"Synced map {map_id}/{map_name} status to {new_status}")
-                except ClientError as exc:
-                    logging.exception(f"Failed to sync map status for {map_id}/{map_name}", extra={"error": str(exc)})
-
-    except ClientError as exc:
-        logging.exception(f"Failed to query maps for job {job_id}", extra={"error": str(exc)})
-
-
 def mark_failed(job_id: str, reason: str) -> None:
     """Mark a job as FAILED in DynamoDB - used when Lambda itself fails"""
     if not (TABLE_NAME and job_id):
@@ -343,13 +327,94 @@ def launch_ecs_task(job_id: str, map_id: str, map_name: str, bucket: str, key: s
             }
         )
 
-        task_arn = response["tasks"][0]["taskArn"] if response.get("tasks") else None
-        logging.info(f"Launched ECS task: {task_arn} for job {job_id}")
+        # Check for launch failures
+        failures = response.get("failures", [])
+        if failures:
+            failure_reasons = [f"{f.get('arn', 'unknown')}: {f.get('reason', 'unknown')}" for f in failures]
+            logging.error(f"ECS task launch failures for job {job_id}: {', '.join(failure_reasons)}")
+            return False
+
+        # Validate that task was actually launched
+        tasks = response.get("tasks", [])
+        if not tasks:
+            logging.error(f"No ECS tasks launched for job {job_id} - empty tasks array")
+            return False
+
+        task_arn = tasks[0]["taskArn"]
+        logging.info(f"Successfully launched ECS task: {task_arn} for job {job_id}")
         return True
 
     except ClientError as exc:
         logging.exception("Failed to launch ECS task", extra={"job_id": job_id, "error": str(exc)})
         return False
+
+
+def validate_s3_input_event(event: dict) -> bool:
+    """
+    Validate S3 input event structure.
+
+    Returns: True if valid
+    Raises: ValueError if validation fails
+    """
+    if not isinstance(event, dict):
+        raise ValueError(f"Event must be a dict, got {type(event).__name__}")
+
+    if "Records" not in event:
+        raise ValueError("Event missing 'Records' field")
+
+    if not isinstance(event["Records"], list):
+        raise ValueError("Records must be a list")
+
+    if len(event["Records"]) == 0:
+        raise ValueError("Records list is empty")
+
+    return True
+
+
+def validate_s3_input_record(record: dict) -> tuple[str, str, int]:
+    """
+    Validate and extract S3 bucket, key, and size from event record.
+
+    Returns: (bucket, key, size_bytes)
+    Raises: ValueError if validation fails
+    """
+    if not isinstance(record, dict):
+        raise ValueError(f"Record must be a dict, got {type(record).__name__}")
+
+    # Check nested structure
+    if "s3" not in record:
+        raise ValueError("Record missing 's3' field")
+
+    s3_data = record["s3"]
+    if not isinstance(s3_data, dict):
+        raise ValueError("s3 field must be a dict")
+
+    if "bucket" not in s3_data or "object" not in s3_data:
+        raise ValueError("s3 record missing 'bucket' or 'object' field")
+
+    if not isinstance(s3_data["bucket"], dict):
+        raise ValueError("bucket field must be a dict")
+
+    if not isinstance(s3_data["object"], dict):
+        raise ValueError("object field must be a dict")
+
+    if "name" not in s3_data["bucket"]:
+        raise ValueError("bucket missing 'name' field")
+
+    if "key" not in s3_data["object"]:
+        raise ValueError("object missing 'key' field")
+
+    bucket = urllib.parse.unquote_plus(s3_data["bucket"]["name"])
+    key = urllib.parse.unquote_plus(s3_data["object"]["key"])
+    size_bytes = s3_data["object"].get("size", 0)
+
+    if not bucket or not key:
+        raise ValueError("bucket name and object key must be non-empty")
+
+    if not isinstance(size_bytes, int) or size_bytes < 0:
+        raise ValueError(f"size must be a non-negative integer, got {size_bytes}")
+
+    return bucket, key, size_bytes
 
 
 def lambda_handler(event, _context):
@@ -365,17 +430,25 @@ def lambda_handler(event, _context):
     if not TABLE_NAME or not S3_COPY_FUNCTION:
         raise RuntimeError("Missing JOBS_TABLE_NAME or S3_COPY_FUNCTION_NAME environment variables")
 
+    # Validate event structure
+    try:
+        validate_s3_input_event(event)
+    except ValueError as e:
+        logging.error(f"Invalid event structure: {e}", extra={"event": str(event)[:1000]})
+        return {"statusCode": 400, "body": f"Invalid event structure: {str(e)}"}
+
     records = []
 
     # Process each S3 event record (usually just one, but could be multiple)
     for record in event.get("Records", []):
-        # Decode the S3 bucket and key from the event
-        bucket = urllib.parse.unquote_plus(record["s3"]["bucket"]["name"])
-        key = urllib.parse.unquote_plus(record["s3"]["object"]["key"])
-        timestamp = iso_timestamp()
+        try:
+            # Validate and extract S3 information
+            bucket, key, size_bytes = validate_s3_input_record(record)
+        except ValueError as e:
+            logging.error(f"Invalid S3 record: {e}", extra={"record": str(record)[:500]})
+            continue
 
-        # Get basic file info from the S3 event
-        size_bytes = record["s3"]["object"].get("size", 0)
+        timestamp = iso_timestamp()
 
         # Extract just the filename (no path)
         map_name = key.split('/')[-1] if '/' in key else key
@@ -387,11 +460,27 @@ def lambda_handler(event, _context):
             logging.error(f"Invalid filename format: {map_name} - {error_msg}")
 
             # Get metadata to create proper tracking records even for invalid files
-            metadata = get_s3_metadata(bucket, key)
+            try:
+                metadata = get_s3_metadata(bucket, key)
+            except ClientError as e:
+                error_code = e.response.get("Error", {}).get("Code", "Unknown")
+                logging.error(
+                    f"Cannot process invalid file - metadata retrieval failed: {bucket}/{key}",
+                    extra={"error_code": error_code, "map_name": map_name}
+                )
+                # Skip this file - can't track it without metadata
+                continue
+
             submitted_by = metadata.get("submittedby", "system")
             map_id = metadata.get("mapid", f"map_{uuid4().hex[:12]}")
             job_id = metadata.get("jobid", f"JobId-{str(uuid4())}")
-            batch_size = int(metadata.get("batchsize", "1"))
+
+            # Parse batch size with error handling
+            try:
+                batch_size = int(metadata.get("batchsize", "1"))
+            except (ValueError, TypeError):
+                logging.warning(f"Invalid batchsize in metadata for {key}, defaulting to 1")
+                batch_size = 1
 
             # Create/get job record
             try:
@@ -433,11 +522,33 @@ def lambda_handler(event, _context):
 
         # Get the metadata that the frontend set when uploading
         # This includes jobId, mapId (hash), batchSize, and who uploaded it
-        metadata = get_s3_metadata(bucket, key)
+        try:
+            metadata = get_s3_metadata(bucket, key)
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            logging.error(
+                f"Cannot process file - metadata retrieval failed: {bucket}/{key}",
+                extra={"error_code": error_code, "map_name": map_name}
+            )
+            # Skip this file - can't track it without metadata
+            records.append({
+                "bucket": bucket,
+                "key": key,
+                "status": "FAILED",
+                "error": f"Metadata retrieval failed: {error_code}"
+            })
+            continue
+
         submitted_by = metadata.get("submittedby", "system")  # S3 lowercases metadata keys
         map_id = metadata.get("mapid", f"map_{uuid4().hex[:12]}")  # Hash-based ID for deduplication
         job_id = metadata.get("jobid", f"JobId-{str(uuid4())}")  # Batch ID from frontend
-        batch_size = int(metadata.get("batchsize", "1"))  # How many files in this upload batch
+
+        # Parse batch size with error handling for corrupted metadata
+        try:
+            batch_size = int(metadata.get("batchsize", "1"))
+        except (ValueError, TypeError):
+            logging.warning(f"Invalid batchsize in metadata for {key}, defaulting to 1")
+            batch_size = 1
 
         # Step 1: Create or get the job record
         # For batch uploads, all files share the same jobId

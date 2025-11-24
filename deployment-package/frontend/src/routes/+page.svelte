@@ -72,7 +72,8 @@
 		backendValidationErrors = new Map();
 	}
 	// Check if all files are valid (client-side validation, georeferencing validation, and no backend errors)
-	$: allFilesValid = validationResults.length > 0 && allValid(validationResults) && backendValidationErrors.size === 0 && !uploadProgress.some(p => p.status === 'invalid');
+	// Block submission if any file has 'invalid' or 'error' status (includes duplicates, validation failures, etc.)
+	$: allFilesValid = validationResults.length > 0 && allValid(validationResults) && backendValidationErrors.size === 0 && !uploadProgress.some(p => p.status === 'invalid' || p.status === 'error');
 
 	// Check if any files have already been uploaded or have backend errors
 	$: hasUploadedOrErrorFiles = uploadProgress.some((p) => p.status === 'done' || p.status === 'error');
@@ -274,7 +275,6 @@
 			const filesToValidateGeoref = selectedFiles.filter((file, index) => validationResults[index].valid);
 
 			if (filesToValidateGeoref.length > 0) {
-				console.log(`[Frontend] Validating georeferencing for ${filesToValidateGeoref.length} files`);
 
 				// Validate files sequentially to avoid overwhelming the server
 				for (let i = 0; i < filesToValidateGeoref.length; i++) {
@@ -284,7 +284,6 @@
 					if (progressIndex === -1) continue;
 
 					try {
-						console.log(`[Frontend] Validating georeferencing for ${file.name}`);
 						const formData = new FormData();
 						formData.append('file', file);
 
@@ -294,14 +293,13 @@
 						});
 
 						const result = await response.json();
-						console.log(`[Frontend] Georef validation result for ${file.name}:`, result);
 
 						if (!response.ok || result.error) {
 							// Georeferencing validation failed
 							uploadProgress[progressIndex] = {
 								...uploadProgress[progressIndex],
 								status: 'invalid',
-								error: result.error || result.details || 'Georeferencing validation failed'
+								error: result.error || result.message || result.details || 'Georeferencing validation failed'
 							};
 						} else {
 							// All validations passed
@@ -325,10 +323,13 @@
 			}
 		} catch (error) {
 			console.error('Validation error:', error);
+			const errorMessage = error instanceof Error
+				? `Validation failed: ${error.message}`
+				: 'Failed to validate file - please check file format and try again';
 			uploadProgress = uploadProgress.map((p) => ({
 				...p,
 				status: 'invalid',
-				error: 'Failed to validate file'
+				error: errorMessage
 			}));
 		} finally {
 			isValidating = false;
@@ -378,12 +379,13 @@
 		isSubmitting = true;
 
 		try {
-			console.log('[Frontend] User state before API call:', user ? 'authenticated' : 'NOT authenticated');
-			console.log('[Frontend] User details:', user);
 
 			// Files are already validated client-side, proceed to upload
-			console.log('[Frontend] Proceeding to upload', selectedFiles.length, 'files (already validated client-side)');
-			const validFiles = selectedFiles;
+			// Filter out files with errors or invalid status
+			const validFiles = selectedFiles.filter((file) => {
+				const progress = uploadProgress.find(p => p.name === file.name);
+				return progress && progress.status === 'valid' && !backendValidationErrors.has(file.name);
+			});
 
 			// Step 2: Get presigned URLs only for valid files
 			const fileRequests = await Promise.all(
@@ -395,7 +397,6 @@
 				}))
 			);
 
-			console.log('[Frontend] Making presigned URL request for', fileRequests.length, 'files');
 
 			const response = await fetch('/api/presigned-url', {
 				method: 'POST',
@@ -403,11 +404,9 @@
 				body: JSON.stringify({ files: fileRequests })
 			});
 
-			console.log('[Frontend] Presigned URL response status:', response.status);
 
 			if (!response.ok) {
 				const errorData = await response.json();
-				console.log('[Frontend] Error response:', errorData);
 
 				// Special handling for authentication errors
 				if (response.status === 401) {
@@ -422,8 +421,6 @@
 
 				// Check if we have per-file errors
 				if (errorData.fileErrors && Array.isArray(errorData.fileErrors)) {
-					console.log('[Frontend] Received fileErrors:', errorData.fileErrors);
-					console.log('[Frontend] Current uploadProgress filenames:', uploadProgress.map(e => e.name));
 
 					// Store backend errors in separate Map to preserve them across re-validation
 					errorData.fileErrors.forEach((fileError: any) => {
@@ -434,7 +431,6 @@
 					// Only mark files as error if they're actually in the fileErrors array
 					uploadProgress = uploadProgress.map((entry) => {
 						const fileError = errorData.fileErrors.find((e: any) => e.fileName === entry.name);
-						console.log(`[Frontend] Matching ${entry.name}: found=${!!fileError}, error=${fileError?.error}`);
 
 						// Only mark as error if this file actually has an error
 						if (fileError) {
@@ -465,7 +461,6 @@
 
 			// If response contains fileErrors, mark those files as error
 			if (mixedErrors && Array.isArray(mixedErrors)) {
-				console.log('[Frontend] Response includes mixed errors:', mixedErrors);
 
 				// Store backend errors in separate Map to preserve them across re-validation
 				mixedErrors.forEach((fileError: any) => {
@@ -476,7 +471,6 @@
 				uploadProgress = uploadProgress.map((entry) => {
 					const fileError = mixedErrors.find((e: any) => e.fileName === entry.name);
 					if (fileError) {
-						console.log(`[Frontend] Marking ${entry.name} as error: ${fileError.error}`);
 						return {
 							...entry,
 							status: 'error',
@@ -502,22 +496,42 @@
 					}
 
 					try {
-						const uploadResponse = await fetch(urlData.url, {
-							method: 'PUT',
-							body: file,
-							headers: {
-								'Content-Type': file.type
+						// Set upload timeout to 10 minutes (600000ms)
+						// This prevents indefinite hangs for large files on slow connections
+						const uploadTimeout = 10 * 60 * 1000;
+						const abortController = new AbortController();
+						const timeoutId = setTimeout(() => abortController.abort(), uploadTimeout);
+
+						try {
+							const uploadResponse = await fetch(urlData.url, {
+								method: 'PUT',
+								body: file,
+								headers: {
+									'Content-Type': file.type
+								},
+								signal: abortController.signal
+							});
+
+							clearTimeout(timeoutId);
+
+							if (!uploadResponse.ok) {
+								throw new Error(`Failed to upload ${file.name}`);
 							}
-						});
 
-						if (!uploadResponse.ok) {
-							throw new Error(`Failed to upload ${file.name}`);
+							// Update the specific file's status
+							uploadProgress = uploadProgress.map((entry) =>
+								entry.name === file.name ? { ...entry, status: 'done' } : entry
+							);
+						} catch (fetchError) {
+							clearTimeout(timeoutId);
+
+							// Check if error was due to timeout/abort
+							if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+								throw new Error(`Upload timeout after ${uploadTimeout / 1000} seconds - file too large or connection too slow`);
+							}
+
+							throw fetchError;
 						}
-
-						// Update the specific file's status
-						uploadProgress = uploadProgress.map((entry) =>
-							entry.name === file.name ? { ...entry, status: 'done' } : entry
-						);
 					} catch (error) {
 						console.error(`Upload failed for ${file.name}:`, error);
 						uploadProgress = uploadProgress.map((entry) =>
@@ -692,7 +706,7 @@
 				</div>
 				<h2>Transform Your Mining Maps</h2>
 				<p class="hero-subtitle">
-					Automated processing pipeline for mining map data. Upload your Maps and get processed results.
+					Upload georeferenced maps. Get processed results instantly.
 				</p>
 				<a class="button primary large" href="/auth/login">
 					<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -704,39 +718,55 @@
 				</a>
 			</div>
 
-			<div class="features-grid">
-				<div class="feature-card">
-					<div class="feature-icon">
-						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<polyline points="16 18 22 12 16 6"></polyline>
-							<polyline points="8 6 2 12 8 18"></polyline>
+			<div class="workflow-steps">
+				<div class="workflow-step">
+					<div class="step-number">1</div>
+					<div class="step-icon">
+						<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+							<polyline points="17 8 12 3 7 8"></polyline>
+							<line x1="12" y1="3" x2="12" y2="15"></line>
 						</svg>
 					</div>
-					<h3>Automated Processing</h3>
-					<p>Upload your ZIP archives and let our system handle validation, processing, and completion automatically.</p>
+					<h3>Upload</h3>
+					<p>ZIP files</p>
 				</div>
 
-				<div class="feature-card">
-					<div class="feature-icon">
-						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<circle cx="12" cy="12" r="10"></circle>
-							<polyline points="12 6 12 12 16 14"></polyline>
+				<div class="workflow-arrow">
+					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<polyline points="9 18 15 12 9 6"></polyline>
+					</svg>
+				</div>
+
+				<div class="workflow-step">
+					<div class="step-number">2</div>
+					<div class="step-icon">
+						<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<circle cx="12" cy="12" r="3"></circle>
+							<path d="M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6M4.22 19.78l4.24-4.24M15.54 8.46l4.24-4.24"></path>
 						</svg>
 					</div>
-					<h3>Real-Time Tracking</h3>
-					<p>Monitor your uploads in real time with live status updates and instant notifications when processing completes.</p>
+					<h3>Process</h3>
+					<p>Automated</p>
 				</div>
 
-				<div class="feature-card">
-					<div class="feature-icon">
-						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<div class="workflow-arrow">
+					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<polyline points="9 18 15 12 9 6"></polyline>
+					</svg>
+				</div>
+
+				<div class="workflow-step">
+					<div class="step-number">3</div>
+					<div class="step-icon">
+						<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
 							<polyline points="7 10 12 15 17 10"></polyline>
 							<line x1="12" y1="15" x2="12" y2="3"></line>
 						</svg>
 					</div>
-					<h3>Instant Downloads</h3>
-					<p>Access your processed map data instantly. Download results directly from your dashboard at any time.</p>
+					<h3>Download</h3>
+					<p>Results</p>
 				</div>
 			</div>
 		</section>
@@ -1380,55 +1410,84 @@
 		gap: 0.6rem;
 	}
 
-	.features-grid {
+	.workflow-steps {
 		position: relative;
 		z-index: 1;
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		gap: 1.5rem;
+		flex-wrap: wrap;
 	}
 
-	.feature-card {
+	.workflow-step {
 		background: var(--panel-background);
 		border: 1px solid var(--panel-border);
 		border-radius: 1rem;
-		padding: 2rem;
+		padding: 1.5rem;
 		display: flex;
 		flex-direction: column;
-		gap: 1rem;
+		align-items: center;
+		gap: 0.75rem;
 		box-shadow: var(--shadow-elevated);
 		backdrop-filter: blur(12px);
 		transition: transform 0.3s ease, box-shadow 0.3s ease;
+		min-width: 160px;
+		position: relative;
 	}
 
-	.feature-card:hover {
+	.workflow-step:hover {
 		transform: translateY(-4px);
 		box-shadow: var(--shadow-floating);
 	}
 
-	.feature-icon {
+	.step-number {
+		position: absolute;
+		top: -12px;
+		right: -12px;
+		width: 32px;
+		height: 32px;
+		border-radius: 50%;
+		background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+		color: white;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 56px;
-		height: 56px;
+		font-weight: 700;
+		font-size: 0.9rem;
+		box-shadow: var(--shadow-floating);
+	}
+
+	.step-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 64px;
+		height: 64px;
 		border-radius: 0.85rem;
 		background: linear-gradient(135deg, rgba(124, 58, 237, 0.15), rgba(79, 70, 229, 0.15));
 		color: var(--accent-primary);
 	}
 
-	.feature-card h3 {
+	.workflow-step h3 {
 		margin: 0;
-		font-size: 1.25rem;
+		font-size: 1.15rem;
 		font-weight: 700;
 		color: var(--text-primary);
 	}
 
-	.feature-card p {
+	.workflow-step p {
 		margin: 0;
 		color: var(--text-secondary);
-		line-height: 1.6;
-		font-size: 0.95rem;
+		font-size: 0.85rem;
+		text-align: center;
+	}
+
+	.workflow-arrow {
+		color: var(--text-secondary);
+		opacity: 0.5;
+		display: flex;
+		align-items: center;
 	}
 
 	.panel {
@@ -2055,8 +2114,13 @@
 			height: 48px;
 		}
 
-		.features-grid {
-			grid-template-columns: 1fr;
+		.workflow-steps {
+			flex-direction: column;
+			gap: 1rem;
+		}
+
+		.workflow-arrow {
+			transform: rotate(90deg);
 		}
 
 		.panel {

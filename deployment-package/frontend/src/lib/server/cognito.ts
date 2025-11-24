@@ -41,14 +41,6 @@ const ensureConfig = (): CognitoConfig => {
 	const domain = env.COGNITO_DOMAIN;
 	const userPoolId = env.COGNITO_USER_POOL_ID;
 
-	// Debug logging
-	console.log('[Cognito Config] Checking environment variables:');
-	console.log('  COGNITO_REGION:', region ? '✓' : '✗');
-	console.log('  COGNITO_CLIENT_ID:', clientId ? '✓' : '✗');
-	console.log('  COGNITO_DOMAIN:', domain ? '✓' : '✗');
-	console.log('  COGNITO_USER_POOL_ID:', userPoolId ? '✓' : '✗');
-	console.log('  Available env keys:', Object.keys(env).filter(k => k.includes('COGNITO')));
-
 	if (!region || !clientId || !domain || !userPoolId) {
 		error(500, 'Missing Cognito configuration.');
 	}

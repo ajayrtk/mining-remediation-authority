@@ -8,7 +8,7 @@
 	export let data: PageData;
 
 	// Auto-refresh configuration
-	const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
+	const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds - reduces server load and provides better UX
 	let autoRefreshInterval: ReturnType<typeof setInterval> | null = null;
 
 	let isRefreshing = false;
@@ -338,7 +338,6 @@
 			}
 
 			const result = await response.json();
-			console.log('Retried:', result);
 
 			// Refresh the maps list
 			await invalidateAll();
@@ -376,7 +375,6 @@
 			}
 
 			const result = await response.json();
-			console.log('Deleted:', result);
 
 			// Refresh the maps list
 			await invalidateAll();
@@ -655,31 +653,26 @@
 										{/if}
 									</span>
 								</th>
-								<th class="sortable" on:click={() => handleSort('sizeBytes')}>
-									<span class="th-content">
+								<th class="sortable align-center" on:click={() => handleSort('sizeBytes')} style="text-align: center;">
 										Size
 										{#if sortColumn === 'sizeBytes'}
 											<span class="sort-arrow">{sortDirection === 'asc' ? '↑' : '↓'}</span>
 										{/if}
-									</span>
 								</th>
-								<th class="sortable" on:click={() => handleSort('createdAt')}>
-									<span class="th-content">
+								<th class="sortable align-center" on:click={() => handleSort('createdAt')} style="text-align: center;">
 										Created
 										{#if sortColumn === 'createdAt'}
 											<span class="sort-arrow">{sortDirection === 'asc' ? '↑' : '↓'}</span>
 										{/if}
-									</span>
 								</th>
-								<th class="sortable" on:click={() => handleSort('jobStatus')}>
-									<span class="th-content">
+								<th class="sortable align-center" on:click={() => handleSort('jobStatus')} style="text-align: center;">
 										Processed
 										{#if sortColumn === 'jobStatus'}
 											<span class="sort-arrow">{sortDirection === 'asc' ? '↑' : '↓'}</span>
 										{/if}
-									</span>
 								</th>
-								<th>Output</th>
+								<th class="align-center">Output</th>
+								<th class="align-center">Actions</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -698,9 +691,9 @@
 										<strong class="map-name">{removeZipExtension(map.mapName)}</strong>
 									</td>
 									<td>{map.ownerEmail}</td>
-									<td>{formatBytes(map.sizeBytes)}</td>
-									<td>{formatDate(map.createdAt)}</td>
-									<td>
+									<td class="align-right">{formatBytes(map.sizeBytes)}</td>
+									<td class="align-right">{formatDate(map.createdAt)}</td>
+									<td class="align-center">
 										{#if map.jobStatus}
 											<span class="status-badge status-{map.jobStatus.toLowerCase()}">
 												{map.jobStatus}
@@ -709,26 +702,25 @@
 											<span class="status-badge status-unknown">Unknown</span>
 										{/if}
 									</td>
-									<td>
-										<div class="action-buttons">
-											<div class="download-area">
-												{#if map.s3Output?.bucket && map.s3Output?.key}
-													<button
-														class="download-button"
-														on:click={() => downloadFile(map)}
-														disabled={downloadingMapId === map.mapId || map.jobStatus !== 'COMPLETED'}
-													>
-														{#if downloadingMapId === map.mapId}
-															Downloading...
-														{:else}
-															Download
-														{/if}
-													</button>
+									<td class="align-center">
+										{#if map.s3Output?.bucket && map.s3Output?.key}
+											<button
+												class="download-button"
+												on:click={() => downloadFile(map)}
+												disabled={downloadingMapId === map.mapId || map.jobStatus !== 'COMPLETED'}
+											>
+												{#if downloadingMapId === map.mapId}
+													Downloading...
 												{:else}
-													<span class="meta">—</span>
+													Download
 												{/if}
-											</div>
-
+											</button>
+										{:else}
+											<span class="meta">—</span>
+										{/if}
+									</td>
+									<td class="align-center">
+										<div class="action-buttons">
 											{#if user && map.ownerEmail === user.email}
 												<button
 													class="delete-button"
@@ -748,19 +740,19 @@
 													</svg>
 													<span class="delete-label">{deletingMapId === map.mapId ? 'Deleting...' : 'Delete'}</span>
 												</button>
-											{/if}
 
-											{#if user && map.ownerEmail === user.email && isRetryAvailable(map)}
-												<button
-													class="retry-button"
-													on:click={() => retryMap(map)}
-													disabled={retryingMapId === map.mapId}
-												>
-													<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class:spinning={retryingMapId === map.mapId}>
-														<path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-													</svg>
-													<span class="retry-label">{retryingMapId === map.mapId ? 'Retrying...' : 'Retry'}</span>
-												</button>
+												{#if isRetryAvailable(map)}
+													<button
+														class="retry-button"
+														on:click={() => retryMap(map)}
+														disabled={retryingMapId === map.mapId}
+													>
+														<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class:spinning={retryingMapId === map.mapId}>
+															<path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+														</svg>
+														<span class="retry-label">{retryingMapId === map.mapId ? 'Retrying...' : 'Retry'}</span>
+													</button>
+												{/if}
 											{/if}
 										</div>
 									</td>
@@ -1294,7 +1286,6 @@
 	th,
 	td {
 		padding: 0.85rem 0.75rem;
-		text-align: left;
 	}
 
 	th {
@@ -1303,6 +1294,28 @@
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		color: var(--text-secondary);
+		text-align: left;
+	}
+
+	td {
+		text-align: left;
+	}
+
+	th.align-right,
+	td.align-right {
+		text-align: right !important;
+	}
+
+	th.align-center,
+	td.align-center {
+		text-align: center !important;
+	}
+
+	th.align-center .th-content {
+		display: flex !important;
+		justify-content: center !important;
+		width: 100% !important;
+		align-items: center !important;
 	}
 
 	th.sortable {
@@ -1438,14 +1451,8 @@
 	.action-buttons {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-	}
-
-	.download-area {
-		min-width: 100px;
-		display: inline-flex;
 		justify-content: center;
-		align-items: center;
+		gap: 0.5rem;
 	}
 
 	.download-button {

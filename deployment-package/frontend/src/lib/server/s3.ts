@@ -1,5 +1,6 @@
 import { S3Client } from '@aws-sdk/client-s3';
 import { env } from '$env/dynamic/private';
+import { s3CircuitBreaker } from './circuit-breaker';
 
 export const MAP_INPUT_BUCKET = env.MAP_INPUT_BUCKET ?? 'map-input';
 export const MAP_OUTPUT_BUCKET = env.MAP_OUTPUT_BUCKET ?? 'map-output';
@@ -26,9 +27,9 @@ function getClient() {
 	return _s3Client;
 }
 
-// Export wrapper for backward compatibility
+// Export wrapper for backward compatibility with circuit breaker protection
 export const s3Client = {
-	send: (command: any) => getClient().send(command)
+	send: (command: any) => s3CircuitBreaker.execute(() => getClient().send(command))
 };
 
 // Export actual client instance for getSignedUrl

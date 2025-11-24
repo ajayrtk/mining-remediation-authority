@@ -5,8 +5,6 @@ import { createHash, randomBytes } from 'node:crypto';
 const STATE_COOKIE = 'mapml-auth-state';
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
-	console.log('[Auth Login] Starting login flow');
-	console.log('[Auth Login] url.origin:', url.origin);
 
 	const state = randomBytes(16).toString('hex');
 	const codeVerifier = randomBytes(32).toString('base64url');
@@ -17,11 +15,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		.replace(/\//g, '_')
 		.replace(/=+$/, '');
 	const redirectUri = `${url.origin}/auth/callback`;
-	console.log('[Auth Login] Using redirect_uri:', redirectUri);
 
 	const redirectTo = url.searchParams.get('redirectTo') ?? '/';
 	const loginUrl = buildLoginUrl(redirectUri, state, { codeChallenge });
-	console.log('[Auth Login] Redirecting to Cognito');
 
 	const payload = Buffer.from(
 		JSON.stringify({ state, redirectTo, codeVerifier }),

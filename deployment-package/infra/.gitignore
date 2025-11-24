@@ -2,26 +2,24 @@
 .terraform/
 *.tfstate
 *.tfstate.*
-*.tfplan
 *.tfvars
-!*.tfvars.example
+*.tfvars.json
 .terraform.lock.hcl
+terraform.tfplan
+tfplan
 crash.log
 crash.*.log
-
-# Terraform overrides
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
 
 # Build artifacts
-build/*.zip
+build/
+*.zip
+*.tar.gz
 
-# Backups
-*.bak
-
-# System files
+# OS files
 .DS_Store
 Thumbs.db
 
@@ -34,3 +32,8 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Temporary files
+*.tmp
+.cache/
+terraform.tfvars

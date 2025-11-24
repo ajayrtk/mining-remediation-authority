@@ -59,8 +59,6 @@ def increment_processed_count(job_id: str) -> dict:
                     ":updated": {"S": iso_timestamp()}
                 }
             )
-            # NOTE: Removed sync_map_status() - individual maps maintain their own statuses
-            # Maps are updated to COMPLETED individually by update_map_output() when they finish processing
 
         return {"processed": processed, "batchSize": batch_size}
     except ClientError as e:
@@ -69,7 +67,7 @@ def increment_processed_count(job_id: str) -> dict:
 
 
 def update_map_output(map_id: str, map_name: str, output_bucket: str, output_key: str) -> None:
-    """Update MAP entry with output S3 location."""
+    """Update MAP entry with output S3 location and mark as COMPLETED."""
     if not MAPS_TABLE_NAME:
         logger.warning("MAPS_TABLE_NAME not configured, skipping MAP update")
         return
@@ -81,7 +79,8 @@ def update_map_output(map_id: str, map_name: str, output_bucket: str, output_key
                 "mapId": {"S": map_id},
                 "mapName": {"S": map_name}
             },
-            UpdateExpression="SET s3Output = :s3_output",
+            UpdateExpression="SET s3Output = :s3_output, #status = :status, processedAt = :processed, updatedAt = :updated",
+            ExpressionAttributeNames={"#status": "status"},
             ExpressionAttributeValues={
                 ":s3_output": {
                     "M": {
@@ -89,16 +88,54 @@ def update_map_output(map_id: str, map_name: str, output_bucket: str, output_key
                         "key": {"S": output_key},
                         "url": {"S": f"https://s3.amazonaws.com/{output_bucket}/{output_key}"}
                     }
-                }
+                },
+                ":status": {"S": "COMPLETED"},
+                ":processed": {"S": iso_timestamp()},
+                ":updated": {"S": iso_timestamp()}
             }
         )
-        logger.info(f"Updated MAP entry with output: {map_id} / {map_name}")
+        logger.info(f"Updated MAP entry with output and marked COMPLETED: {map_id} / {map_name}")
     except ClientError as exc:
         logger.exception("Failed to update MAP entry with output", extra={
             "mapId": map_id,
             "mapName": map_name,
             "error": str(exc)
         })
+
+
+def validate_event(event: dict) -> tuple[str, str, str, str]:
+    """
+    Validate and extract required fields from Lambda event.
+
+    Returns: (job_id, map_id, source_bucket, source_key)
+    Raises: ValueError if validation fails
+    """
+    if not isinstance(event, dict):
+        raise ValueError(f"Event must be a dict, got {type(event).__name__}")
+
+    # Check required fields exist
+    required_fields = ["jobId", "mapId", "bucket", "key"]
+    missing = [f for f in required_fields if f not in event]
+    if missing:
+        raise ValueError(f"Missing required fields: {', '.join(missing)}")
+
+    # Extract and validate each field
+    job_id = event.get("jobId")
+    map_id = event.get("mapId")
+    source_bucket = event.get("bucket")
+    source_key = event.get("key")
+
+    # Ensure fields are non-empty strings
+    if not isinstance(job_id, str) or not job_id.strip():
+        raise ValueError("jobId must be a non-empty string")
+    if not isinstance(map_id, str) or not map_id.strip():
+        raise ValueError("mapId must be a non-empty string")
+    if not isinstance(source_bucket, str) or not source_bucket.strip():
+        raise ValueError("bucket must be a non-empty string")
+    if not isinstance(source_key, str) or not source_key.strip():
+        raise ValueError("key must be a non-empty string")
+
+    return job_id.strip(), map_id.strip(), source_bucket.strip(), source_key.strip()
 
 
 def lambda_handler(event, _context):
@@ -118,13 +155,18 @@ def lambda_handler(event, _context):
     if not TABLE_NAME or not OUTPUT_BUCKET:
         raise RuntimeError("Missing JOBS_TABLE_NAME or OUTPUT_BUCKET environment variables")
 
-    job_id = event.get("jobId")
-    map_id = event.get("mapId")
-    source_bucket = event.get("bucket")
-    source_key = event.get("key")
-
-    if not all([job_id, map_id, source_bucket, source_key]):
-        raise ValueError("Missing required fields: jobId, mapId, bucket, or key")
+    # Validate event structure and extract fields
+    try:
+        job_id, map_id, source_bucket, source_key = validate_event(event)
+    except ValueError as e:
+        logger.error(f"Event validation failed: {e}", extra={"event": event})
+        return {
+            "statusCode": 400,
+            "body": json.dumps({
+                "status": "FAILED",
+                "error": f"Invalid event structure: {str(e)}"
+            })
+        }
 
     # Extract map name from source key (filename)
     map_name = source_key.split('/')[-1] if '/' in source_key else source_key
@@ -216,8 +258,24 @@ def lambda_handler(event, _context):
                     ":failed": {"S": "FAILED"}
                 },
             )
-            # NOTE: Removed sync_map_status() - individual maps maintain their own statuses
-            # This specific map will be marked FAILED by the error handling above
+
+            # Update THIS specific map's status to FAILED
+            if MAPS_TABLE_NAME:
+                dynamo.update_item(
+                    TableName=MAPS_TABLE_NAME,
+                    Key={
+                        "mapId": {"S": map_id},
+                        "mapName": {"S": map_name}
+                    },
+                    UpdateExpression="SET #status = :status, updatedAt = :updated, errorMessage = :error",
+                    ExpressionAttributeNames={"#status": "status"},
+                    ExpressionAttributeValues={
+                        ":status": {"S": "FAILED"},
+                        ":updated": {"S": iso_timestamp()},
+                        ":error": {"S": error_message[:500]}
+                    }
+                )
+                logger.info(f"Updated map {map_id}/{map_name} status to FAILED")
         except ClientError:
             logger.exception("Failed to update DynamoDB with failure status")
 
@@ -244,8 +302,24 @@ def lambda_handler(event, _context):
                     ":failed": {"S": "FAILED"}
                 },
             )
-            # NOTE: Removed sync_map_status() - individual maps maintain their own statuses
-            # This specific map will be marked FAILED by the error handling above
+
+            # Update THIS specific map's status to FAILED
+            if MAPS_TABLE_NAME:
+                dynamo.update_item(
+                    TableName=MAPS_TABLE_NAME,
+                    Key={
+                        "mapId": {"S": map_id},
+                        "mapName": {"S": map_name}
+                    },
+                    UpdateExpression="SET #status = :status, updatedAt = :updated, errorMessage = :error",
+                    ExpressionAttributeNames={"#status": "status"},
+                    ExpressionAttributeValues={
+                        ":status": {"S": "FAILED"},
+                        ":updated": {"S": iso_timestamp()},
+                        ":error": {"S": error_message[:500]}
+                    }
+                )
+                logger.info(f"Updated map {map_id}/{map_name} status to FAILED")
         except ClientError:
             logger.exception("Failed to update DynamoDB with failure status")
 

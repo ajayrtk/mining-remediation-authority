@@ -24,19 +24,26 @@ def is_number(x: str) -> bool:
 
 def get_sheet_number_from_filename(filename: str) -> str:
     """
-    Extract sheet number from filename
-    Format: [seamID]_[SheetNumber][optional_suffix].zip
-    - Seam ID is MANDATORY before first underscore (alphanumeric, at least 1 character)
-    - Underscore is MANDATORY
-    - Sheet number must be exactly 6 digits in format: XXXXXX or XX_XXXX after first underscore
+    Extract sheet number from filename using UPDATED LOGIC
 
-    Examples:
-    - 17836_26_9285_UpperHirst.zip -> 269285 (VALID: has seam ID + 6 digits)
-    - 16519_453858_.zip -> 453858 (VALID: has seam ID + 6 digits)
-    - 453858_.zip -> None (INVALID: no sheet number after underscore)
-    - _453858_.zip -> None (INVALID: no seam ID before underscore)
-    - 543858.zip -> None (INVALID: no underscore)
-    - 16519_45385_.zip -> None (INVALID: only 5 digits)
+    Format: SeamID_SheetNumber[_optional_suffix].zip
+    - SeamID: MANDATORY, non-empty alphanumeric (everything before sheet number pattern)
+    - Underscore: MANDATORY separator
+    - SheetNumber: MANDATORY, exactly 6 digits in format XXXXXX or XX_XXXX
+
+    The parser finds the 6-digit sheet number pattern first, then treats everything before it as the seam ID.
+
+    Valid examples:
+    - 16516_433857.zip → sheet=433857 (SeamID=16516)
+    - D723_43_3857.zip → sheet=433857 (SeamID=D723)
+    - 43_433857.zip → sheet=433857 (SeamID=43)
+    - 43_43_3857.zip → sheet=433857 (SeamID=43)
+    - 17836_26_9285_UpperHirst.zip → sheet=269285 (SeamID=17836)
+
+    Invalid examples:
+    - _453858.zip → None (no seam ID before sheet number)
+    - 453858.zip → None (no underscore separator)
+    - 16516_4538.zip → None (only 4 digits in sheet number)
     """
     # Remove file extension
     name_without_ext = filename.rsplit('.', 1)[0]
@@ -45,42 +52,47 @@ def get_sheet_number_from_filename(filename: str) -> str:
     if '_' not in name_without_ext:
         return None
 
-    # Split by first underscore
-    parts = name_without_ext.split('_', 1)
+    # Look for 6-digit sheet number pattern in two formats:
+    # Format 1: XX_XXXX (2 digits + separator + 4 digits)
+    # Format 2: XXXXXX (6 consecutive digits)
+    # Use negative lookbehind to ensure pattern isn't preceded by digits
+    sheet_number_pattern = r'(?<!\d)(\d{2}[-\s_]\d{4}|\d{6})(?=[-\s_]|$)'
+    match = re.search(sheet_number_pattern, name_without_ext)
 
-    # Validate seam ID exists (part before underscore must be non-empty)
-    if not parts[0]:
-        return None  # No seam ID (e.g., "_453858.zip")
+    if not match:
+        # No valid sheet number pattern found
+        return None
 
-    # Validate sheet number part exists
-    if len(parts) < 2 or not parts[1]:
-        return None  # No sheet number after underscore (e.g., "453858_.zip")
+    # Extract sheet number (remove any separators to get 6 digits)
+    sheet_number_raw = match.group(1)
+    sheet_number = re.sub(r'\D', '', sheet_number_raw)
 
-    sheet_part = parts[1]
+    # Everything before the sheet number pattern is the seam ID
+    sheet_number_start_index = match.start()
+    seam_id = name_without_ext[:sheet_number_start_index]
 
-    # Look for exactly 6 digits in two possible formats:
-    # 1. XX_XXXX - 2 digits + optional separator + 4 digits
-    # 2. XXXXXX - 6 consecutive digits
+    # Validate seam ID exists and ends with underscore
+    if not seam_id or not seam_id.endswith('_'):
+        return None
 
-    # First try: 2 digits + optional separator + 4 digits (XX_XXXX format)
-    match = re.search(r'^(\d{2})\D?(\d{4})(?:\D|$)', sheet_part)
-    if match:
-        # Combine the two digit groups
-        sheet_number = match.group(1) + match.group(2)
-        return sheet_number
+    # Remove trailing underscore from seam ID
+    seam_id_clean = seam_id[:-1]
 
-    # Second try: 6 consecutive digits (XXXXXX format)
-    match = re.search(r'^(\d{6})(?:\D|$)', sheet_part)
-    if match:
-        return match.group(1)
+    # Validate seam ID is not empty after removing underscore
+    if not seam_id_clean or seam_id_clean.strip() == '':
+        return None
 
-    # No valid 6-digit sheet number found
-    return None
+    # Validate seam ID contains only alphanumeric characters
+    if not re.match(r'^[a-zA-Z0-9]+$', seam_id_clean):
+        return None
+
+    return sheet_number
 
 
 def get_filename_validation_error(filename: str) -> str:
     """
     Generate a detailed error message explaining what's wrong with the filename
+    Uses NEW LOGIC: find sheet number pattern first
     """
     # Remove file extension
     name_without_ext = filename.rsplit('.', 1)[0]
@@ -88,57 +100,62 @@ def get_filename_validation_error(filename: str) -> str:
     # Check if underscore exists
     if '_' not in name_without_ext:
         return (
-            f"Invalid filename format: '{filename}'. "
             f"Missing mandatory underscore separator. "
-            f"Expected format: [seamID]_[SheetNumber].zip (e.g., '16516_433857.zip')"
+            f"Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip')"
         )
 
-    # Split by first underscore
-    parts = name_without_ext.split('_', 1)
+    # Look for 6-digit sheet number pattern
+    sheet_number_pattern = r'(?<!\d)(\d{2}[-\s_]\d{4}|\d{6})(?=[-\s_]|$)'
+    match = re.search(sheet_number_pattern, name_without_ext)
 
-    # Check if seam ID exists
-    if not parts[0]:
+    if not match:
+        # No valid sheet number pattern found
+        all_digits = re.sub(r'\D', '', name_without_ext)
+        if len(all_digits) == 0:
+            return (
+                f"No digits found. "
+                f"Sheet number must be exactly 6 digits in format XXXXXX or XX_XXXX."
+            )
+        elif len(all_digits) < 6:
+            return (
+                f"Sheet number must be exactly 6 digits, found {len(all_digits)} digits. "
+                f"Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip' or '43_43_3857.zip')"
+            )
+        else:
+            return (
+                f"Found {len(all_digits)} digits but sheet number format is incorrect. "
+                f"Expected 6 digits in format XXXXXX or XX_XXXX (e.g., '433857' or '43_3857')."
+            )
+
+    # Extract sheet number info
+    sheet_number_start_index = match.start()
+    seam_id = name_without_ext[:sheet_number_start_index]
+
+    # Check if seam ID ends with underscore
+    if not seam_id or not seam_id.endswith('_'):
         return (
-            f"Invalid filename format: '{filename}'. "
+            f"Missing mandatory seam ID before sheet number. "
+            f"Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip')"
+        )
+
+    # Remove trailing underscore and validate
+    seam_id_clean = seam_id[:-1]
+
+    if not seam_id_clean or seam_id_clean.strip() == '':
+        return (
             f"Missing mandatory seam ID before underscore. "
-            f"Expected format: [seamID]_[SheetNumber].zip (e.g., '16516_433857.zip')"
+            f"Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip')"
         )
 
-    # Check if sheet number part exists
-    if len(parts) < 2 or not parts[1]:
+    # Check alphanumeric
+    if not re.match(r'^[a-zA-Z0-9]+$', seam_id_clean):
         return (
-            f"Invalid filename format: '{filename}'. "
-            f"Missing sheet number after underscore. "
-            f"Expected format: [seamID]_[SheetNumber].zip (e.g., '16516_433857.zip')"
+            f"Invalid seam ID '{seam_id_clean}'. "
+            f"Seam ID must contain only letters and numbers."
         )
 
-    sheet_part = parts[1]
-
-    # Try to find any digits
-    digits = re.findall(r'\d+', sheet_part)
-    if not digits:
-        return (
-            f"Invalid filename format: '{filename}'. "
-            f"No digits found in sheet number part. "
-            f"Sheet number must be exactly 6 digits in format XXXXXX or XX_XXXX."
-        )
-
-    # Check if we have 6 digits but not in the right format
-    all_digits = ''.join(digits)
-    if len(all_digits) != 6:
-        return (
-            f"Invalid filename format: '{filename}'. "
-            f"Sheet number must be exactly 6 digits, found {len(all_digits)} digits. "
-            f"Expected format: [seamID]_[SheetNumber].zip (e.g., '16516_433857.zip' or '16516_43_3857.zip')"
-        )
-
-    # If we have 6 digits but they're not at the start of the sheet part
-    return (
-        f"Invalid filename format: '{filename}'. "
-        f"Sheet number format is incorrect. "
-        f"Expected 6 digits immediately after first underscore in format XXXXXX or XX_XXXX. "
-        f"Valid examples: '16516_433857.zip' or '16516_43_3857.zip'"
-    )
+    # If we got here, something else is wrong
+    return f"Invalid filename format: '{filename}'"
 
 
 def read_world_file(jpg_path: Path) -> tuple:

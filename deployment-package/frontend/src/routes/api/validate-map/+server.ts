@@ -5,21 +5,43 @@ import { writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
+import { ApiErrors } from '$lib/server/api-response';
+import { checkRateLimit, RateLimitPresets } from '$lib/server/rate-limit';
 
 // Body size limit is configured via BODY_SIZE_LIMIT environment variable in Dockerfile (200MB)
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
+	const correlationId = locals.correlationId;
+
+	// Rate limiting - prevent abuse of validation endpoint
+	if (locals.user) {
+		const rateLimitResult = checkRateLimit(locals.user.email, RateLimitPresets.GENEROUS);
+		if (!rateLimitResult.allowed) {
+			return ApiErrors.tooManyRequests(
+				'Too many validation requests. Please try again later.',
+				rateLimitResult.resetTime,
+				{ correlationId }
+			);
+		}
+	}
+
 	try {
 		// Get the uploaded file from form data
 		const formData = await request.formData();
 		const file = formData.get('file') as File;
 
 		if (!file) {
-			return json({ error: 'No file provided' }, { status: 400 });
+			return ApiErrors.badRequest('No file provided', {
+				correlationId,
+				fieldErrors: { file: 'File is required' }
+			});
 		}
 
 		// Validate file type
 		if (!file.name.endsWith('.zip')) {
-			return json({ error: 'Only .zip files are supported' }, { status: 400 });
+			return ApiErrors.badRequest('Only .zip files are supported', {
+				correlationId,
+				details: `Received file type: ${file.name.split('.').pop()}`
+			});
 		}
 
 		// Create a temporary file to store the upload
@@ -50,13 +72,12 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 	} catch (error) {
 		console.error('[validate-map] Validation error:', error);
-		return json(
-			{
-				error: 'Failed to validate map',
-				details: error instanceof Error ? error.message : 'Unknown error'
-			},
-			{ status: 500 }
-		);
+		// Surface the specific error message to users instead of generic "Failed to validate map"
+		const errorMessage = error instanceof Error ? error.message : 'Unknown validation error occurred';
+		return ApiErrors.internalError(errorMessage, {
+			correlationId,
+			details: errorMessage
+		});
 	}
 };
 

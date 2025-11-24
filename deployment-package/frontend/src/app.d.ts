@@ -4,6 +4,9 @@ declare global {
 	namespace App {
 		interface Locals {
 			user: import('./lib/server/cognito').CognitoUser | null;
+			correlationId: string;
+			traceId: string;
+			segmentId: string;
 		}
 
 		interface PageData {

@@ -226,3 +226,4 @@ users.csv
 *.orig
 *.rej
 *.patch
+*.bak

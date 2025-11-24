@@ -46,7 +46,7 @@ def finalize_job(job_id: str, status: str, extra: dict | None = None) -> None:
     try:
         dynamo.update_item(
             TableName=TABLE_NAME,
-            Key={"job_id": {"S": job_id}},
+            Key={"jobId": {"S": job_id}},
             UpdateExpression="SET " + ", ".join(expression_parts),
             ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
@@ -55,14 +55,81 @@ def finalize_job(job_id: str, status: str, extra: dict | None = None) -> None:
         logging.exception("Failed to finalize job", extra={"job_id": job_id, "status": status})
 
 
+def validate_s3_event(event: dict) -> bool:
+    """
+    Validate S3 event structure.
+
+    Returns: True if valid
+    Raises: ValueError if validation fails
+    """
+    if not isinstance(event, dict):
+        raise ValueError(f"Event must be a dict, got {type(event).__name__}")
+
+    if "Records" not in event:
+        raise ValueError("Event missing 'Records' field")
+
+    if not isinstance(event["Records"], list):
+        raise ValueError("Records must be a list")
+
+    return True
+
+
+def validate_s3_record(record: dict) -> tuple[str, str]:
+    """
+    Validate and extract S3 bucket and key from event record.
+
+    Returns: (bucket, key)
+    Raises: ValueError if validation fails
+    """
+    if not isinstance(record, dict):
+        raise ValueError(f"Record must be a dict, got {type(record).__name__}")
+
+    # Check nested structure
+    if "s3" not in record:
+        raise ValueError("Record missing 's3' field")
+
+    s3_data = record["s3"]
+    if not isinstance(s3_data, dict):
+        raise ValueError("s3 field must be a dict")
+
+    if "bucket" not in s3_data or "object" not in s3_data:
+        raise ValueError("s3 record missing 'bucket' or 'object' field")
+
+    if "name" not in s3_data["bucket"]:
+        raise ValueError("bucket missing 'name' field")
+
+    if "key" not in s3_data["object"]:
+        raise ValueError("object missing 'key' field")
+
+    bucket = urllib.parse.unquote_plus(s3_data["bucket"]["name"])
+    key = urllib.parse.unquote_plus(s3_data["object"]["key"])
+
+    if not bucket or not key:
+        raise ValueError("bucket name and object key must be non-empty")
+
+    return bucket, key
+
+
 def lambda_handler(event, _context):
     if not TABLE_NAME:
         raise RuntimeError("Missing JOBS_TABLE_NAME environment variable")
 
+    # Validate event structure
+    try:
+        validate_s3_event(event)
+    except ValueError as e:
+        logging.error(f"Invalid event structure: {e}", extra={"event": str(event)[:1000]})
+        return {"status": "error", "message": str(e)}
+
     for record in event.get("Records", []):
-        bucket = urllib.parse.unquote_plus(record["s3"]["bucket"]["name"])
-        key = urllib.parse.unquote_plus(record["s3"]["object"]["key"])
         job_id = None
+
+        try:
+            # Validate and extract S3 information
+            bucket, key = validate_s3_record(record)
+        except ValueError as e:
+            logging.error(f"Invalid S3 record: {e}", extra={"record": str(record)[:500]})
+            continue
 
         try:
             head = s3.head_object(Bucket=bucket, Key=key)

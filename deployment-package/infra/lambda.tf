@@ -14,7 +14,7 @@ resource "aws_lambda_function" "input_handler" {
 	role          = local.input_handler_role_arn
 	source_code_hash = data.archive_file.input_handler.output_base64sha256
 	filename         = data.archive_file.input_handler.output_path
-	timeout          = 60
+	timeout          = 300  # 5 minutes - handles validation, metadata extraction, and ECS launch for large files
 	environment {
 		variables = {
 			JOBS_TABLE_NAME = aws_dynamodb_table.map_jobs.name

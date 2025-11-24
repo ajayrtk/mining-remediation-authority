@@ -1,8 +1,15 @@
 /**
- * Shared filename parser - Single source of truth for map filename validation
+ * Shared filename parser - Frontend validation for map filenames
  * Used by: zipValidator, presigned-url, validate-map API
  *
- * This ensures consistent parsing across all validation layers
+ * This ensures consistent parsing across all frontend validation layers.
+ *
+ * IMPORTANT: This validation logic is intentionally duplicated in the Lambda backend
+ * (infra/lambda/input_handler/handler.py:validate_filename) for defense-in-depth security.
+ * Frontend validation provides immediate user feedback, while Lambda validation catches
+ * files that bypass the frontend (e.g., direct S3 uploads, API calls).
+ *
+ * When modifying validation rules, update BOTH locations to maintain consistency.
  */
 
 export interface ParsedFilename {
@@ -16,19 +23,23 @@ export interface ParsedFilename {
  * Parse map filename to extract SeamID and SheetNumber
  *
  * Format: SeamID_SheetNumber[_optional_suffix].zip
- * - SeamID: MANDATORY, non-empty alphanumeric (before first underscore)
+ * - SeamID: MANDATORY, non-empty alphanumeric (everything before sheet number pattern)
  * - Underscore: MANDATORY separator
  * - SheetNumber: MANDATORY, exactly 6 digits in format XXXXXX or XX_XXXX
+ *
+ * The parser finds the 6-digit sheet number pattern first, then treats everything before it as the seam ID.
  *
  * Valid examples:
  * - 16516_433857.zip → {seamId: "16516", sheetNumber: "433857"}
  * - D723_43_3857.zip → {seamId: "D723", sheetNumber: "433857"}
+ * - 43_433857.zip → {seamId: "43", sheetNumber: "433857"}
+ * - 43_43_3857.zip → {seamId: "43", sheetNumber: "433857"}
  * - 17836_26_9285_UpperHirst.zip → {seamId: "17836", sheetNumber: "269285"}
  *
  * Invalid examples:
- * - _453858.zip (no seam ID)
- * - 453858.zip (no underscore)
- * - 16516_4538.zip (only 4 digits)
+ * - _453858.zip (no seam ID before sheet number)
+ * - 453858.zip (no underscore separator)
+ * - 16516_4538.zip (only 4 digits in sheet number)
  */
 export function parseMapFilename(filename: string): ParsedFilename {
 	// Remove file extension
@@ -44,13 +55,64 @@ export function parseMapFilename(filename: string): ParsedFilename {
 		};
 	}
 
-	// Split at first underscore only
-	const firstUnderscoreIndex = nameWithoutExt.indexOf('_');
-	const seamId = nameWithoutExt.substring(0, firstUnderscoreIndex);
-	const afterSeamId = nameWithoutExt.substring(firstUnderscoreIndex + 1);
+	// Look for 6-digit sheet number pattern in two formats:
+	// Format 1: XX_XXXX (2 digits + separator + 4 digits)
+	// Format 2: XXXXXX (6 consecutive digits)
+	// Use regex with negative lookbehind to ensure pattern isn't preceded by digits
 
-	// Validate seam ID exists and is non-empty
-	if (!seamId || seamId.trim() === '') {
+	const sheetNumberPattern = /(?<!\d)(\d{2}[-\s_]\d{4}|\d{6})(?=[-\s_]|$)/;
+	const match = nameWithoutExt.match(sheetNumberPattern);
+
+	if (!match) {
+		// No valid sheet number pattern found
+		const allDigits = nameWithoutExt.replace(/\D/g, '');
+		if (allDigits.length === 0) {
+			return {
+				seamId: '',
+				sheetNumber: '',
+				valid: false,
+				error: `No digits found. Sheet number must be exactly 6 digits in format XXXXXX or XX_XXXX.`
+			};
+		} else if (allDigits.length < 6) {
+			return {
+				seamId: '',
+				sheetNumber: '',
+				valid: false,
+				error: `Sheet number must be exactly 6 digits, found ${allDigits.length} digits. Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip' or '43_43_3857.zip')`
+			};
+		} else {
+			return {
+				seamId: '',
+				sheetNumber: '',
+				valid: false,
+				error: `Found ${allDigits.length} digits but sheet number format is incorrect. Expected 6 digits in format XXXXXX or XX_XXXX (e.g., '433857' or '43_3857').`
+			};
+		}
+	}
+
+	// Extract sheet number (remove any separators to get 6 digits)
+	const sheetNumberRaw = match[1];
+	const sheetNumber = sheetNumberRaw.replace(/\D/g, '');
+
+	// Everything before the sheet number pattern is the seam ID
+	const sheetNumberStartIndex = match.index!;
+	const seamId = nameWithoutExt.substring(0, sheetNumberStartIndex);
+
+	// Validate seam ID exists and ends with underscore
+	if (!seamId || !seamId.endsWith('_')) {
+		return {
+			seamId: '',
+			sheetNumber: '',
+			valid: false,
+			error: `Missing mandatory seam ID before sheet number. Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip')`
+		};
+	}
+
+	// Remove trailing underscore from seam ID
+	const seamIdClean = seamId.slice(0, -1);
+
+	// Validate seam ID is not empty after removing underscore
+	if (!seamIdClean || seamIdClean.trim() === '') {
 		return {
 			seamId: '',
 			sheetNumber: '',
@@ -60,84 +122,20 @@ export function parseMapFilename(filename: string): ParsedFilename {
 	}
 
 	// Validate seam ID contains only alphanumeric characters
-	if (!/^[a-zA-Z0-9]+$/.test(seamId)) {
+	if (!/^[a-zA-Z0-9]+$/.test(seamIdClean)) {
 		return {
-			seamId: seamId,
+			seamId: seamIdClean,
 			sheetNumber: '',
 			valid: false,
-			error: `Invalid seam ID '${seamId}'. Seam ID must contain only letters and numbers.`
+			error: `Invalid seam ID '${seamIdClean}'. Seam ID must contain only letters and numbers.`
 		};
 	}
 
-	// Check if sheet number part exists
-	if (!afterSeamId || afterSeamId.trim() === '') {
-		return {
-			seamId: seamId,
-			sheetNumber: '',
-			valid: false,
-			error: `Missing sheet number after underscore. Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip')`
-		};
-	}
-
-	// Look for exactly 6 digits in two possible formats:
-	// 1. XX_XXXX - 2 digits + optional separator + 4 digits (e.g., 43_3857)
-	// 2. XXXXXX - 6 consecutive digits (e.g., 433857)
-
-	// Try format 1: 2 digits + separator + 4 digits
-	const format1Match = afterSeamId.match(/^(\d{2})[-\s_](\d{4})(?:[-\s_]|$)/);
-	if (format1Match) {
-		const sheetNumber = format1Match[1] + format1Match[2];
-		return {
-			seamId: seamId,
-			sheetNumber: sheetNumber,
-			valid: true
-		};
-	}
-
-	// Try format 2: 6 consecutive digits
-	const format2Match = afterSeamId.match(/^(\d{6})(?:[-\s_]|$)/);
-	if (format2Match) {
-		return {
-			seamId: seamId,
-			sheetNumber: format2Match[1],
-			valid: true
-		};
-	}
-
-	// If we get here, no valid 6-digit pattern was found
-	// Count how many digits we actually have for better error message
-	const allDigits = afterSeamId.replace(/\D/g, '');
-
-	if (allDigits.length === 0) {
-		return {
-			seamId: seamId,
-			sheetNumber: '',
-			valid: false,
-			error: `No digits found in sheet number part. Sheet number must be exactly 6 digits.`
-		};
-	} else if (allDigits.length < 6) {
-		return {
-			seamId: seamId,
-			sheetNumber: '',
-			valid: false,
-			error: `Sheet number must be exactly 6 digits, found ${allDigits.length} digits. Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip' or '16516_43_3857.zip')`
-		};
-	} else if (allDigits.length > 6) {
-		return {
-			seamId: seamId,
-			sheetNumber: '',
-			valid: false,
-			error: `Sheet number has too many digits (${allDigits.length}). First 6 digits must be at the start after seam ID, format: XXXXXX or XX_XXXX.`
-		};
-	} else {
-		// Exactly 6 digits but not at the start
-		return {
-			seamId: seamId,
-			sheetNumber: '',
-			valid: false,
-			error: `Sheet number format is incorrect. Expected 6 digits immediately after first underscore in format XXXXXX or XX_XXXX. Valid examples: '16516_433857.zip' or '16516_43_3857.zip'`
-		};
-	}
+	return {
+		seamId: seamIdClean,
+		sheetNumber: sheetNumber,
+		valid: true
+	};
 }
 
 /**

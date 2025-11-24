@@ -72,7 +72,7 @@ const fetchRecentJobs = async (): Promise<JobSummary[]> => {
 					mapNames = (mapsResult.Items ?? []).map(m => String(m.mapName ?? ''));
 					mapStatuses = (mapsResult.Items ?? []).map(m => String(m.status ?? 'UNKNOWN'));
 				} catch (error) {
-					console.error(`Failed to fetch maps for job ${jobId}`, error);
+					console.error(`[page.server] Failed to fetch maps for job ${jobId}`, error);
 				}
 
 				return {
@@ -104,7 +104,6 @@ const fetchRecentJobs = async (): Promise<JobSummary[]> => {
 			const totalMapsFromJob = job.totalMaps ?? job.batchSize ?? job.processedCount ?? 0;
 			if (job.mapNames.length === 0 && totalMapsFromJob > 0) {
 				orphanedJobIds.push(job.jobId);
-				console.log(`Found orphaned job ${job.jobId} with ${totalMapsFromJob} total maps but 0 actual maps - will be cleaned up`);
 			} else {
 				validJobs.push(job);
 			}
@@ -119,15 +118,14 @@ const fetchRecentJobs = async (): Promise<JobSummary[]> => {
 							TableName: MAP_JOBS_TABLE,
 							Key: { jobId }
 						})
-					).catch(err => console.error(`Failed to delete orphaned job ${jobId}:`, err))
+					).catch(err => console.error(`[page.server] Failed to delete orphaned job ${jobId}:`, err))
 				)
 			);
-			console.log(`Successfully deleted ${orphanedJobIds.length} orphaned job(s)`);
 		}
 
 		return validJobs;
 	} catch (error) {
-		console.error('Failed to fetch job history from DynamoDB', error);
+		console.error('[page.server] Failed to fetch job history from DynamoDB', error);
 		return [];
 	}
 };

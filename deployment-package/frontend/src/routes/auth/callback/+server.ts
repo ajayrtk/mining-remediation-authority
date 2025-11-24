@@ -24,18 +24,11 @@ const decodeState = (raw: string | undefined): AuthStateCookie | null => {
 
 
 export const GET: RequestHandler = async ({ url, cookies, fetch }) => {
-	console.log('[Auth Callback] Received callback from Cognito');
-	console.log('[Auth Callback] url.origin:', url.origin);
-	console.log('[Auth Callback] url.href:', url.href);
 
 	const code = url.searchParams.get('code');
 	const returnedState = url.searchParams.get('state');
 	const stateCookie = decodeState(cookies.get(STATE_COOKIE));
 
-	console.log('[Auth Callback] Code present:', !!code);
-	console.log('[Auth Callback] State present:', !!returnedState);
-	console.log('[Auth Callback] State cookie present:', !!stateCookie);
-	console.log('[Auth Callback] State match:', stateCookie?.state === returnedState);
 
 	cookies.delete(STATE_COOKIE, {
 		path: '/',
@@ -50,12 +43,10 @@ export const GET: RequestHandler = async ({ url, cookies, fetch }) => {
 	}
 
 	const redirectUri = `${url.origin}/auth/callback`;
-	console.log('[Auth Callback] Using redirect_uri:', redirectUri);
 
 	let tokens;
 	try {
 		tokens = await exchangeCodeForTokens(code, redirectUri, fetch, stateCookie.codeVerifier);
-		console.log('[Auth Callback] Token exchange successful');
 	} catch (err) {
 		console.error('[Auth Callback] Token exchange failed:', err);
 		throw err;
@@ -73,9 +64,6 @@ export const GET: RequestHandler = async ({ url, cookies, fetch }) => {
 
 	// Store session server-side and only keep session ID in cookie
 	const sessionId = createSession(session);
-	console.log('[Auth Callback] Creating session with ID:', sessionId);
-	console.log('[Auth Callback] Setting cookie with secure: true, sameSite: none');
-	console.log('[Auth Callback] Setting cookie with domain:', url.hostname);
 
 	// Delete any existing session cookies first
 	cookies.delete(SESSION_COOKIE, {
@@ -94,6 +82,5 @@ export const GET: RequestHandler = async ({ url, cookies, fetch }) => {
 	});
 
 	const redirectPath = stateCookie.redirectTo || '/';
-	console.log('[Auth Callback] Redirecting to:', redirectPath);
 	throw redirect(302, redirectPath);
 };

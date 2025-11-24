@@ -8,7 +8,15 @@ import { QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { json } from '@sveltejs/kit';
 import { MAPS_TABLE, dynamoDocClient } from '$lib/server/dynamo';
 import { MAP_INPUT_BUCKET, getS3Client } from '$lib/server/s3';
+import { checkRateLimit, RateLimitPresets } from '$lib/server/rate-limit';
 import type { RequestHandler } from './$types';
+
+// Constants for retry logic timeouts
+const PROCESSING_TIMEOUT_MINUTES = 30;
+const QUEUED_TIMEOUT_MINUTES = 10;
+// Reduced from 1 hour to 15 minutes for better security
+// URLs are only needed for immediate upload after generation
+const PRESIGNED_URL_EXPIRY_SECONDS = 900; // 15 minutes
 
 const ALLOWED_MIME = new Set([
 	'application/zip',
@@ -72,20 +80,20 @@ const checkMapExists = async (mapId: string): Promise<{
 				reason = 'Previous processing failed, retry allowed';
 			} else if (status === 'PROCESSING' || status === 'DISPATCHED') {
 				// File is currently processing - check if it's stuck
-				// If it's been processing for over 30 minutes, something's wrong
-				if (ageMinutes > 30) {
+				// If it's been processing for over PROCESSING_TIMEOUT_MINUTES, something's wrong
+				if (ageMinutes > PROCESSING_TIMEOUT_MINUTES) {
 					canRetry = true;
-					reason = 'Processing timeout detected (>30 min), retry allowed';
+					reason = `Processing timeout detected (>${PROCESSING_TIMEOUT_MINUTES} min), retry allowed`;
 				} else {
 					canRetry = false;
 					reason = 'File is currently being processed, please wait';
 				}
 			} else if (!status || status === 'QUEUED') {
 				// File is queued but hasn't started - check if it's stale
-				// If queued for over 10 minutes, probably stuck
-				if (ageMinutes > 10) {
+				// If queued for over QUEUED_TIMEOUT_MINUTES, probably stuck
+				if (ageMinutes > QUEUED_TIMEOUT_MINUTES) {
 					canRetry = true;
-					reason = 'Stale pending job detected (>10 min), retry allowed';
+					reason = `Stale pending job detected (>${QUEUED_TIMEOUT_MINUTES} min), retry allowed`;
 				} else {
 					canRetry = false;
 					reason = 'File is queued for processing';
@@ -109,7 +117,7 @@ const checkMapExists = async (mapId: string): Promise<{
 		// Map doesn't exist, so this is a new file
 		return { exists: false, canRetry: true };
 	} catch (error) {
-		console.error(`Failed to check if map ${mapId} exists`, error);
+		console.error(`[presigned-url] Failed to check if map ${mapId} exists`, error);
 		// If we can't check, err on the side of allowing upload
 		return { exists: false, canRetry: true };
 	}
@@ -137,17 +145,44 @@ type PresignedUrlResponse = {
 
 // Main POST handler - generates presigned URLs for file uploads
 export const POST: RequestHandler = async ({ request, locals }) => {
-	console.log('[Backend Auth Check] locals.user:', locals.user ? 'authenticated' : 'NOT authenticated');
+	// Extract correlation ID from request headers for distributed tracing
+	const correlationId = request.headers.get('X-Correlation-ID') || `server-${Date.now()}`;
 
 	// Make sure user is authenticated before allowing uploads
 	if (!locals.user) {
-		console.error('[Backend Auth] User not authenticated in locals');
+		console.error(`[presigned-url][${correlationId}] User not authenticated`);
 		return json({ error: 'Please sign in to upload files.' }, { status: 401 });
+	}
+
+	// Apply rate limiting to prevent abuse
+	// Upload endpoint uses strict limit: 20 uploads per hour
+	const rateLimit = checkRateLimit(locals.user.email, RateLimitPresets.UPLOAD);
+	if (!rateLimit.allowed) {
+		const resetDate = new Date(rateLimit.resetTime);
+		console.warn(`[presigned-url][${correlationId}] Rate limit exceeded for user ${locals.user.email}`);
+		return json(
+			{
+				error: `Rate limit exceeded. You can upload ${rateLimit.limit} batches per hour. Limit resets at ${resetDate.toLocaleTimeString()}.`,
+				rateLimitExceeded: true,
+				resetTime: rateLimit.resetTime
+			},
+			{
+				status: 429,
+				headers: {
+					'X-RateLimit-Limit': rateLimit.limit.toString(),
+					'X-RateLimit-Remaining': '0',
+					'X-RateLimit-Reset': rateLimit.resetTime.toString(),
+					'Retry-After': Math.ceil((rateLimit.resetTime - Date.now()) / 1000).toString()
+				}
+			}
+		);
 	}
 
 	try {
 		const body = await request.json();
 		const files = body.files as FileRequest[];
+
+		console.log(`[presigned-url][${correlationId}] Processing ${files?.length || 0} file(s) for user ${locals.user.email} (${rateLimit.remaining} uploads remaining)`);
 
 		// Validate request
 		if (!files || !Array.isArray(files) || files.length === 0) {
@@ -264,10 +299,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			}
 
 			// If we reach here, either it's a new file or a retry is allowed
-			if (checkResult.exists && checkResult.canRetry) {
-				console.log(`[Retry] Allowing retry for ${validatedFile.file.name} (mapId: ${validatedFile.mapId}, reason: ${checkResult.reason})`);
-			}
-
 			filesToUpload.push(validatedFile);
 		}
 
@@ -282,7 +313,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				});
 
 				const url = await getSignedUrl(getS3Client(), command, {
-					expiresIn: 3600 // URL expires in 1 hour
+					expiresIn: PRESIGNED_URL_EXPIRY_SECONDS
 				});
 
 				return {
@@ -300,23 +331,32 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const hasErrors = fileErrors.length > 0;
 		const hasSuccessful = presignedUrls.length > 0;
 
-		if (hasErrors) {
-			console.log('[Backend] Returning fileErrors:', JSON.stringify(fileErrors, null, 2));
-		}
-
 		// If all files failed validation, return 400 error
 		if (hasErrors && !hasSuccessful) {
 			return json({ fileErrors }, { status: 400 });
 		}
 
 		// If some succeeded, return 200 with results (and errors if any)
-		return json({
-			jobId: hasSuccessful ? jobId : undefined,
-			urls: presignedUrls,
-			fileErrors: hasErrors ? fileErrors : undefined
-		});
+		// Include rate limit headers in response
+		return json(
+			{
+				jobId: hasSuccessful ? jobId : undefined,
+				urls: presignedUrls,
+				fileErrors: hasErrors ? fileErrors : undefined
+			},
+			{
+				headers: {
+					'X-RateLimit-Limit': rateLimit.limit.toString(),
+					'X-RateLimit-Remaining': rateLimit.remaining.toString(),
+					'X-RateLimit-Reset': rateLimit.resetTime.toString()
+				}
+			}
+		);
 	} catch (error) {
-		console.error('Failed to generate presigned URLs', error);
-		return json({ error: 'Failed to generate upload URLs. Please try again.' }, { status: 500 });
+		console.error(`[presigned-url][${correlationId}] Failed to generate presigned URLs`, error);
+		const errorMessage = error instanceof Error
+			? `Failed to generate upload URLs: ${error.message}. Please try again.`
+			: 'Failed to generate upload URLs. Please try again.';
+		return json({ error: errorMessage }, { status: 500 });
 	}
 };

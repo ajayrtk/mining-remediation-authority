@@ -1,12 +1,13 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { GetCommand } from '@aws-sdk/lib-dynamodb';
+import { s3Client } from '$lib/server/s3';
+import { dynamoDocClient, MAPS_TABLE } from '$lib/server/dynamo';
 import JSZip from 'jszip';
-
-// Initialize S3 client
-const s3Client = new S3Client({
-	region: process.env.AWS_REGION || 'eu-west-1'
-});
+import type { Readable } from 'stream';
+import { ApiErrors } from '$lib/server/api-response';
+import { checkRateLimit, RateLimitPresets } from '$lib/server/rate-limit';
 
 interface MapDownloadRequest {
 	mapId: string;
@@ -15,28 +16,72 @@ interface MapDownloadRequest {
 	key: string;
 }
 
-export const POST: RequestHandler = async ({ request }) => {
-	console.log('[bulk-download API] Bulk download request received');
+export const POST: RequestHandler = async ({ request, locals }) => {
+	const correlationId = locals.correlationId;
+
+	// Authentication check
+	if (!locals.user) {
+		return ApiErrors.unauthorized('Please sign in to download maps', { correlationId });
+	}
+
+	// Rate limiting - bulk download is expensive
+	const rateLimitResult = checkRateLimit(locals.user.email, RateLimitPresets.STRICT);
+	if (!rateLimitResult.allowed) {
+		return ApiErrors.tooManyRequests(
+			'Too many bulk download requests. Please try again later.',
+			rateLimitResult.resetTime,
+			{ correlationId }
+		);
+	}
 
 	try {
 		const body = await request.json();
 		const maps = body.maps as MapDownloadRequest[];
 
 		if (!maps || !Array.isArray(maps) || maps.length === 0) {
-			console.log('[bulk-download API] No maps provided');
-			return json({ error: 'No maps provided for download' }, { status: 400 });
+			return ApiErrors.badRequest('No maps provided for download', {
+				correlationId,
+				fieldErrors: { maps: 'At least one map is required' }
+			});
 		}
 
-		console.log(`[bulk-download API] Downloading ${maps.length} maps`);
-
-		// Validate all maps have required fields
+		// Validate all maps have required fields and verify ownership
 		for (const map of maps) {
-			if (!map.bucket || !map.key || !map.mapName) {
-				console.log('[bulk-download API] Invalid map data:', map);
-				return json(
-					{ error: `Invalid map data: missing bucket, key, or mapName for map ${map.mapId}` },
-					{ status: 400 }
+			if (!map.bucket || !map.key || !map.mapName || !map.mapId) {
+				return ApiErrors.badRequest('Invalid map data', {
+					correlationId,
+					details: `Missing bucket, key, mapName, or mapId for map ${map.mapId || 'unknown'}`
+				});
+			}
+
+			// Verify ownership by querying DynamoDB
+			try {
+				const result = await dynamoDocClient.send(
+					new GetCommand({
+						TableName: MAPS_TABLE,
+						Key: { mapId: map.mapId, mapName: map.mapName }
+					})
 				);
+
+				if (!result.Item) {
+					return ApiErrors.notFound(`Map not found: ${map.mapName}`, {
+						correlationId,
+						details: `Map ID: ${map.mapId}`
+					});
+				}
+
+				if (result.Item.ownerEmail !== locals.user.email) {
+					return ApiErrors.forbidden('You can only download your own maps', {
+						correlationId,
+						details: `Attempted to download map: ${map.mapName}`
+					});
+				}
+			} catch (dbError) {
+				console.error('[bulk-download] Ownership verification failed:', dbError);
+				return ApiErrors.internalError('Failed to verify map ownership', {
+					correlationId,
+					details: dbError instanceof Error ? dbError.message : 'Database error'
+				});
 			}
 		}
 
@@ -45,7 +90,6 @@ export const POST: RequestHandler = async ({ request }) => {
 
 		// Download all files from S3 and add to ZIP
 		for (const map of maps) {
-			console.log(`[bulk-download API] Downloading ${map.mapName} from s3://${map.bucket}/${map.key}`);
 
 			try {
 				// Download file from S3
@@ -63,14 +107,13 @@ export const POST: RequestHandler = async ({ request }) => {
 
 				// Convert S3 body stream to buffer
 				const chunks: Uint8Array[] = [];
-				for await (const chunk of response.Body as any) {
+				for await (const chunk of response.Body as Readable) {
 					chunks.push(chunk);
 				}
 				const buffer = Buffer.concat(chunks);
 
 				// Add file to ZIP with original name
 				zip.file(map.mapName, buffer);
-				console.log(`[bulk-download API] Added ${map.mapName} to archive (${buffer.length} bytes)`);
 			} catch (s3Error) {
 				console.error(`[bulk-download API] Failed to download ${map.mapName}:`, s3Error);
 				// Continue with other files even if one fails
@@ -79,14 +122,12 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 
 		// Generate ZIP file as buffer
-		console.log('[bulk-download API] Generating ZIP file');
 		const zipBuffer = await zip.generateAsync({
 			type: 'nodebuffer',
 			compression: 'DEFLATE',
 			compressionOptions: { level: 6 }
 		});
 
-		console.log(`[bulk-download API] ZIP file generated (${zipBuffer.length} bytes)`);
 
 		// Return the ZIP file
 		const filename = `maps-${new Date().toISOString().split('T')[0]}.zip`;
@@ -100,12 +141,9 @@ export const POST: RequestHandler = async ({ request }) => {
 		});
 	} catch (error) {
 		console.error('[bulk-download API] Error:', error);
-		return json(
-			{
-				error: 'Failed to create bulk download',
-				details: error instanceof Error ? error.message : 'Unknown error'
-			},
-			{ status: 500 }
-		);
+		return ApiErrors.internalError('Failed to create bulk download', {
+			correlationId,
+			details: error instanceof Error ? error.message : 'Unknown error'
+		});
 	}
 };
