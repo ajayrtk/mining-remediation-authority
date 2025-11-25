@@ -4,7 +4,7 @@ Complete documentation for deploying and maintaining the MRA Mines Map applicati
 
 ---
 
-## 📖 Documentation Guide
+## Documentation Guide
 
 ### Getting Started
 
@@ -21,10 +21,19 @@ Complete documentation for deploying and maintaining the MRA Mines Map applicati
    - Infrastructure overview
    - Component relationships
    - Data flow diagrams
+   - Project structure
+
+### Development
+
+3. **[Developer Onboarding](developer-onboarding.md)** - Getting started with development
+   - Local development setup
+   - Code structure
+   - Development workflow
+   - Testing guidelines
 
 ### Day-to-Day Operations
 
-3. **[Maintenance Guide](maintenance-guide.md)** - Operations and monitoring
+4. **[Maintenance Guide](maintenance-guide.md)** - Operations and monitoring
    - Common operations
    - Monitoring and logging
    - Backup procedures
@@ -32,24 +41,28 @@ Complete documentation for deploying and maintaining the MRA Mines Map applicati
 
 ### Problem Solving
 
-4. **[Troubleshooting](troubleshooting.md)** - Common issues and solutions
+5. **[Troubleshooting](troubleshooting.md)** - Common issues and solutions
    - IAM role conflicts
-   - CloudFront issues
    - ECS deployment problems
    - Authentication errors
-   - Cost optimization
+   - Processing failures
 
 ### Advanced Configuration
 
-5. **[IAM Configuration](iam-configuration.md)** - IAM role setup
+6. **[IAM Configuration](iam-configuration.md)** - IAM role setup
    - Using existing IAM roles
    - Creating new roles
    - Role permissions
    - Best practices
 
+7. **[Custom Domain Setup](CUSTOM_DOMAIN_SETUP.md)** - Production HTTPS configuration
+   - ACM certificate setup
+   - Route53 DNS configuration
+   - CloudFront integration
+
 ### Production Deployment
 
-6. **[Production Readiness](production-readiness.md)** - Production deployment checklist
+8. **[Production Readiness](production-readiness.md)** - Production deployment checklist
    - Critical requirements
    - High availability setup
    - Security hardening
@@ -58,7 +71,7 @@ Complete documentation for deploying and maintaining the MRA Mines Map applicati
 
 ### Change History
 
-7. **[Changelog](changelog.md)** - Recent changes and updates
+9. **[Changelog](changelog.md)** - Recent changes and updates
    - Infrastructure changes
    - Bug fixes
    - New features
@@ -75,6 +88,11 @@ Complete documentation for deploying and maintaining the MRA Mines Map applicati
 - Refer to [Troubleshooting](troubleshooting.md) if issues occur
 - Check [IAM Configuration](iam-configuration.md) for IAM role setup
 
+**For Developers:**
+- Start with [Developer Onboarding](developer-onboarding.md)
+- Review [Architecture](architecture.md) for system understanding
+- Use [Troubleshooting](troubleshooting.md) for debugging
+
 **For Operators:**
 - Use [Maintenance Guide](maintenance-guide.md) for daily tasks
 - Reference [Troubleshooting](troubleshooting.md) for problems
@@ -85,33 +103,31 @@ Complete documentation for deploying and maintaining the MRA Mines Map applicati
 - Check [Production Readiness](production-readiness.md) for production planning
 - See [IAM Configuration](iam-configuration.md) for security model
 
-**For DevOps:**
-- See [Production Readiness](production-readiness.md) for production setup
-- Follow [Maintenance Guide](maintenance-guide.md) for operations
-- Check [Changelog](changelog.md) for recent changes
-
 ### By Task
 
 **Deploying for the first time:**
-→ [Deployment Guide](deployment-guide.md)
+> [Deployment Guide](deployment-guide.md)
+
+**Setting up local development:**
+> [Developer Onboarding](developer-onboarding.md)
 
 **Something is broken:**
-→ [Troubleshooting](troubleshooting.md)
+> [Troubleshooting](troubleshooting.md)
 
 **IAM role already exists:**
-→ [IAM Configuration](iam-configuration.md)
+> [IAM Configuration](iam-configuration.md)
 
 **Planning production deployment:**
-→ [Production Readiness](production-readiness.md)
+> [Production Readiness](production-readiness.md)
 
 **Understanding how it works:**
-→ [Architecture](architecture.md)
+> [Architecture](architecture.md)
 
 **Day-to-day operations:**
-→ [Maintenance Guide](maintenance-guide.md)
+> [Maintenance Guide](maintenance-guide.md)
 
 **What changed recently:**
-→ [Changelog](changelog.md)
+> [Changelog](changelog.md)
 
 ---
 
@@ -119,27 +135,41 @@ Complete documentation for deploying and maintaining the MRA Mines Map applicati
 
 ```
 deployment-package/
-├── docs/                    ← You are here
-│   ├── README.md            - This file (documentation index)
-│   ├── deployment-guide.md  - Complete deployment walkthrough
-│   ├── architecture.md      - System design
-│   ├── maintenance-guide.md - Operations guide
-│   ├── troubleshooting.md   - Problem solving
-│   ├── iam-configuration.md - IAM setup
-│   ├── production-readiness.md - Production checklist
-│   └── changelog.md         - Recent changes
+├── docs/                         <- You are here
+│   ├── README.md                 - This file (documentation index)
+│   ├── architecture.md           - System design & project structure
+│   ├── developer-onboarding.md   - Development setup guide
+│   ├── deployment-guide.md       - Complete deployment walkthrough
+│   ├── maintenance-guide.md      - Operations guide
+│   ├── troubleshooting.md        - Problem solving
+│   ├── iam-configuration.md      - IAM setup
+│   ├── production-readiness.md   - Production checklist
+│   ├── CUSTOM_DOMAIN_SETUP.md    - Custom domain guide
+│   ├── COST_OPTIMIZATION_10_USERS.md - Cost optimization
+│   └── changelog.md              - Recent changes
 │
-├── infra/                   - Terraform infrastructure code
-│   ├── README.md            - Quick reference + links to docs/
-│   ├── main.tf              - Provider configuration
-│   ├── vpc.tf               - Networking
-│   ├── ecs.tf               - Container orchestration
-│   └── ...                  - Other infrastructure files
+├── frontend/                     - SvelteKit web application
+│   ├── src/
+│   │   ├── routes/              - Pages & API endpoints
+│   │   └── lib/                 - Utilities & components
+│   ├── Dockerfile
+│   └── build_and_push.sh        - Deploy script
 │
-├── frontend/                - React application
-├── backend/                 - Lambda functions
-└── scripts/                 - Deployment scripts
+├── infra/                        - Terraform infrastructure
+│   ├── lambda/                   - Lambda function code
+│   │   ├── input_handler/       - S3 upload handler
+│   │   ├── output_handler/      - Processing complete handler
+│   │   ├── s3_copy_processor/   - S3 copy operations
+│   │   └── pre_auth_trigger/    - Cognito validation
+│   ├── *.tf                     - Terraform configuration files
+│   └── variables.tf             - Configuration variables
+│
+├── scripts/                      - Deployment scripts
+│
+└── backend/                      - (Empty - serverless architecture)
 ```
+
+**Note:** The `backend/` folder is intentionally empty. This application uses a serverless architecture where backend logic is handled by Lambda functions (in `infra/lambda/`) and ECS processor tasks.
 
 ---
 
@@ -150,20 +180,23 @@ deployment-package/
 **Q: Where do I start?**
 A: Start with the [Deployment Guide](deployment-guide.md)
 
+**Q: How do I set up local development?**
+A: See [Developer Onboarding](developer-onboarding.md)
+
 **Q: I'm getting an IAM role error**
 A: See [IAM Configuration](iam-configuration.md) and [Troubleshooting](troubleshooting.md)
 
-**Q: CloudFront shows "Something went wrong"**
-A: See [Troubleshooting](troubleshooting.md) → "CloudFront Shows Something Went Wrong"
-
 **Q: How do I update the frontend?**
-A: See [Maintenance Guide](maintenance-guide.md) → "Update Frontend Application"
+A: See [Maintenance Guide](maintenance-guide.md) > "Update Frontend Application"
 
 **Q: Is this production-ready?**
 A: See [Production Readiness](production-readiness.md) for assessment
 
 **Q: How much will this cost?**
-A: See [Production Readiness](production-readiness.md) → "Cost Implications"
+A: See [Production Readiness](production-readiness.md) > "Cost Implications"
+
+**Q: Why is the backend folder empty?**
+A: The application uses serverless architecture. Backend logic is in Lambda functions (`infra/lambda/`) and ECS processor tasks.
 
 ---
 
@@ -171,21 +204,22 @@ A: See [Production Readiness](production-readiness.md) → "Cost Implications"
 
 | Document | Status | Last Updated |
 |----------|--------|--------------|
-| Deployment Guide | ✅ Up-to-date | 2025-11-06 |
-| Architecture | ✅ Current | 2025-11-14 |
-| Maintenance Guide | ✅ Current | 2025-11-06 |
-| Troubleshooting | ✅ Up-to-date | 2025-11-06 |
-| IAM Configuration | ✅ Current | 2025-11-06 |
-| Production Readiness | ✅ Current | 2025-11-06 |
-| Changelog | ✅ Current | 2025-11-14 |
+| Architecture | Updated | 2025-11-25 |
+| Developer Onboarding | Updated | 2025-11-25 |
+| Deployment Guide | Current | 2025-11-06 |
+| Maintenance Guide | Current | 2025-11-06 |
+| Troubleshooting | Current | 2025-11-06 |
+| IAM Configuration | Current | 2025-11-06 |
+| Production Readiness | Current | 2025-11-06 |
+| Changelog | Current | 2025-11-23 |
 
 **Current Infrastructure:**
 - Region: eu-west-2
 - Terraform: >= 1.6.0
 - AWS Provider: >= 5.0
-- Features: IAM role reuse, conditional resources, auto-refresh UI, performance-optimized ECS
-- ECS Processor: 8 vCPU / 16 GB RAM
-- Frontend: Auto-refresh (10-second interval)
+- Frontend: SvelteKit on ECS Fargate (0.25 vCPU, 512 MB)
+- Processor: ECS Fargate (8 vCPU, 16 GB RAM)
+- Auto-refresh: 10-second interval
 
 ---
 
@@ -200,5 +234,5 @@ When updating documentation:
 
 ---
 
-**Documentation Version:** 2.1
-**Last Updated:** 2025-11-14
+**Documentation Version:** 3.0
+**Last Updated:** 2025-11-25

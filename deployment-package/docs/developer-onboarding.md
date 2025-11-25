@@ -6,9 +6,9 @@ Welcome to the MRA Mine Maps Processing System! This guide will help you get up 
 
 1. [Prerequisites](#prerequisites)
 2. [Project Overview](#project-overview)
-3. [Local Development Setup](#local-development-setup)
-4. [Architecture Overview](#architecture-overview)
-5. [Directory Structure](#directory-structure)
+3. [Project Structure](#project-structure)
+4. [Local Development Setup](#local-development-setup)
+5. [Architecture Overview](#architecture-overview)
 6. [Development Workflow](#development-workflow)
 7. [Testing](#testing)
 8. [Deployment](#deployment)
@@ -46,16 +46,95 @@ The MRA Mine Maps Processing System is a serverless application that:
 
 1. **Accepts** user-uploaded mine map ZIP files via web interface
 2. **Validates** filename format and ZIP contents
-3. **Processes** mine plan PDFs using GDAL/spatial libraries in ECS
+3. **Processes** mine plan PDFs using EasyOCR/OpenCV in ECS
 4. **Stores** processed maps in S3 and metadata in DynamoDB
 5. **Provides** download and management interface
 
 **Tech Stack:**
 - **Frontend:** SvelteKit + TypeScript
-- **Backend:** AWS Lambda (Node.js) + ECS (Python)
+- **Backend:** AWS Lambda (Python) + ECS Fargate (Python)
 - **Storage:** S3 + DynamoDB
 - **Infrastructure:** Terraform
-- **Deployment:** Docker + AWS ECS/Lambda
+- **Deployment:** Docker + AWS ECS
+
+## Project Structure
+
+```
+deployment-package/
+├── frontend/                    # SvelteKit web application
+│   ├── src/
+│   │   ├── routes/             # SvelteKit routes & API endpoints
+│   │   │   ├── +page.svelte    # Main upload interface
+│   │   │   ├── +page.server.ts # Server-side data loading
+│   │   │   ├── +layout.svelte  # Root layout
+│   │   │   ├── maps/           # Maps management page
+│   │   │   │   └── +page.svelte
+│   │   │   ├── auth/           # Authentication routes
+│   │   │   │   └── callback/   # OAuth callback
+│   │   │   └── api/            # API endpoints
+│   │   │       ├── presigned-url/    # Generate S3 upload URLs
+│   │   │       ├── delete-map/       # Delete map files
+│   │   │       ├── retry-map/        # Retry failed processing
+│   │   │       ├── download-url/     # Generate download URLs
+│   │   │       ├── bulk-download/    # Bulk download
+│   │   │       ├── batch-operations/ # Batch delete/retry
+│   │   │       ├── validate-map/     # Validate map files
+│   │   │       └── webhooks/         # External webhooks
+│   │   └── lib/
+│   │       ├── server/         # Server-side utilities
+│   │       │   ├── dynamo.ts   # DynamoDB client
+│   │       │   ├── s3.ts       # S3 client
+│   │       │   ├── cognito.ts  # Cognito authentication
+│   │       │   ├── circuit-breaker.ts  # Fault tolerance
+│   │       │   ├── rate-limit.ts       # Request limiting
+│   │       │   ├── audit-log.ts        # Logging
+│   │       │   ├── tracing.ts          # Request tracing
+│   │       │   └── webhook.ts          # Webhook handling
+│   │       ├── utils/          # Shared utilities
+│   │       │   ├── filenameParser.ts   # Filename validation
+│   │       │   └── zipValidator.ts     # ZIP file validation
+│   │       ├── components/     # Svelte components
+│   │       ├── stores/         # Svelte stores
+│   │       └── styles/         # CSS styles
+│   ├── Dockerfile
+│   ├── build_and_push.sh       # Deploy script
+│   ├── package.json
+│   └── svelte.config.js
+│
+├── infra/                       # Terraform infrastructure
+│   ├── lambda/                  # Lambda function code
+│   │   ├── input_handler/      # S3 upload trigger
+│   │   │   └── handler.py      # Validates uploads, launches ECS
+│   │   ├── output_handler/     # Processing complete handler
+│   │   │   └── handler.py
+│   │   ├── s3_copy_processor/  # S3 copy operations (fallback)
+│   │   │   └── handler.py
+│   │   └── pre_auth_trigger/   # Cognito validation
+│   ├── main.tf                 # Provider configuration
+│   ├── vpc.tf                  # Networking
+│   ├── alb.tf                  # Application Load Balancer
+│   ├── ecs.tf                  # Processor task definition
+│   ├── frontend_ecs_simple.tf  # Frontend ECS service
+│   ├── cognito.tf              # User authentication
+│   ├── dynamodb.tf             # Database tables
+│   ├── s3.tf                   # Storage buckets
+│   ├── lambda.tf               # Lambda functions
+│   ├── iam.tf                  # IAM roles and policies
+│   ├── variables.tf            # Configuration variables
+│   └── outputs.tf              # Terraform outputs
+│
+├── scripts/                     # Deployment scripts
+│   └── deploy.sh
+│
+├── docs/                        # Documentation (you are here)
+│
+└── backend/                     # (Empty - serverless architecture)
+```
+
+**Important:** The `backend/` folder is empty because the application uses a **serverless architecture**:
+- Backend API logic is in `frontend/src/routes/api/` (SvelteKit API routes)
+- Processing logic is in Lambda functions (`infra/lambda/`)
+- Heavy processing runs on ECS Fargate (Docker image from separate `mra-mine-plans-ds` repository)
 
 ## Local Development Setup
 
@@ -71,20 +150,19 @@ cd final-mra-maps-project/deployment-package
 ```bash
 cd frontend
 npm install
-cp .env.example .env.local  # Create from example if exists
 ```
 
-Edit `.env.local` with your development AWS credentials:
+Create `.env.local` with your development AWS credentials:
 
 ```env
-AWS_REGION=eu-west-1
+AWS_REGION=eu-west-2
 AWS_ACCESS_KEY_ID=your_access_key
 AWS_SECRET_ACCESS_KEY=your_secret_key
-MAPS_TABLE=mra-mines-dev-maps
-JOBS_TABLE=mra-mines-dev-jobs
-MAP_INPUT_BUCKET=mra-mines-dev-input
-MAP_OUTPUT_BUCKET=mra-mines-dev-output
-COGNITO_USER_POOL_ID=eu-west-1_XXXXX
+MAPS_TABLE=mra-mines-staging-maps
+JOBS_TABLE=mra-mines-staging-jobs
+MAP_INPUT_BUCKET=mra-mines-staging-input
+MAP_OUTPUT_BUCKET=mra-mines-staging-output
+COGNITO_USER_POOL_ID=eu-west-2_XXXXX
 COGNITO_CLIENT_ID=your_client_id
 ```
 
@@ -95,35 +173,26 @@ npm run dev
 # Visit http://localhost:5173
 ```
 
-### 3. Backend Setup (Lambda Functions)
+### 3. Lambda Functions
 
-Lambda functions are in `backend/lambda/`. Each function has its own directory:
-
-```bash
-cd backend/lambda/input_handler
-pip install -r requirements.txt -t .
-```
-
-To test locally, you can invoke Lambda functions using AWS SAM or direct Python execution.
-
-### 4. ECS Task Setup (Processing Engine)
-
-The ECS processing task is in a separate repository at:
-`/Users/ajay.rawat/Projects-Hartree/MRA-Mines/mra-mine-plans-ds`
-
-**Note:** Do NOT modify this repository directly unless coordinating with the data science team.
-
-To test the Docker image locally:
+Lambda functions are in `infra/lambda/`. Each function has its own directory with a `handler.py`:
 
 ```bash
-cd /path/to/mra-mine-plans-ds
-docker build -t mra-processor .
-docker run --rm \
-  -e AWS_REGION=eu-west-1 \
-  -e AWS_ACCESS_KEY_ID=xxx \
-  -e AWS_SECRET_ACCESS_KEY=xxx \
-  mra-processor python process_map.py --map-id map_test123
+cd infra/lambda/input_handler
+# Review the handler.py file
 ```
+
+To test locally, you can invoke Lambda functions using AWS SAM or direct Python execution with test events.
+
+### 4. ECS Processor
+
+The ECS processing task is in a **separate repository**: `mra-mine-plans-ds`
+
+**Important:** Do NOT modify this repository directly unless coordinating with the data science team. The processor Docker image:
+- Contains EasyOCR for text recognition
+- Uses OpenCV for image processing
+- Uses GDAL for geospatial operations
+- Is built and pushed separately
 
 ### 5. Infrastructure Setup
 
@@ -135,7 +204,7 @@ terraform init
 terraform plan -var-file="terraform.tfvars"
 ```
 
-**Important:** Never commit `terraform.tfvars` with real credentials. Use `terraform.tfvars.example` as a template.
+**Important:** Never commit `terraform.tfvars` with real credentials.
 
 ## Architecture Overview
 
@@ -144,21 +213,22 @@ terraform plan -var-file="terraform.tfvars"
 ```
 User Browser
     ↓ (1. Upload request)
-Frontend (SvelteKit)
+Frontend (SvelteKit on ECS)
     ↓ (2. Generate presigned URL)
+    ↓ (3. Browser uploads directly to S3)
 S3 Input Bucket
-    ↓ (3. S3 Event triggers Lambda)
+    ↓ (4. S3 Event triggers Lambda)
 Lambda: input_handler
-    ↓ (4. Validate & queue job)
+    ↓ (5. Validate & create job record)
 DynamoDB (Maps + Jobs tables)
-    ↓ (5. Lambda triggers ECS task)
-ECS Task (Python + GDAL)
-    ↓ (6. Process PDF → GeoJSON)
+    ↓ (6. Lambda launches ECS task)
+ECS Task (Python + EasyOCR + OpenCV)
+    ↓ (7. Process map -> results)
 S3 Output Bucket
-    ↓ (7. Update status)
+    ↓ (8. Update status)
 DynamoDB
-    ↓ (8. User downloads)
-Frontend → S3 Output
+    ↓ (9. User downloads)
+Frontend -> S3 Output (presigned URL)
 ```
 
 ### Key Components
@@ -166,74 +236,23 @@ Frontend → S3 Output
 **Frontend (`frontend/`):**
 - **SvelteKit app** with SSR and API routes
 - **Routes:** Upload interface (`/`), Maps management (`/maps`)
-- **API Endpoints:** `/api/presigned-url`, `/api/delete-map`, `/api/retry-map`
+- **API Endpoints:** `/api/presigned-url`, `/api/delete-map`, `/api/retry-map`, etc.
 - **Server utilities:** DynamoDB client, S3 client, circuit breaker, rate limiting
 
-**Lambda Functions (`backend/lambda/`):**
+**Lambda Functions (`infra/lambda/`):**
 - **input_handler:** Validates uploads, creates DynamoDB entries, triggers ECS
-- **s3_copy_processor:** Handles S3 event notifications (future use)
+- **output_handler:** Updates status when processing completes
+- **s3_copy_processor:** Fallback processor (Lambda-based)
+- **pre_auth_trigger:** Cognito authentication validation
 
-**ECS Task (separate repo):**
-- **Python processing engine** using GDAL, rasterio, PyPDF2
-- Extracts mine plan data from PDFs and generates GeoJSON
+**ECS Processor (separate repo):**
+- **Python processing engine** using EasyOCR, OpenCV, GDAL
+- Extracts mine plan data from maps
 - Uploads results to S3 output bucket
 
 **Infrastructure (`infra/`):**
-- **Terraform modules** for DynamoDB, S3, Lambda, ECS, ALB, CloudFront
-- **State management** via S3 backend
-
-### Data Flow Details
-
-See `docs/architecture.md` for comprehensive architecture diagrams and component interactions.
-
-## Directory Structure
-
-```
-deployment-package/
-├── frontend/                    # SvelteKit web application
-│   ├── src/
-│   │   ├── lib/
-│   │   │   ├── server/         # Server-side utilities
-│   │   │   │   ├── dynamo.ts   # DynamoDB client
-│   │   │   │   ├── s3.ts       # S3 client
-│   │   │   │   ├── circuit-breaker.ts
-│   │   │   │   ├── rate-limit.ts
-│   │   │   │   ├── audit-log.ts
-│   │   │   │   └── ...
-│   │   │   └── utils/          # Shared utilities
-│   │   │       ├── filenameParser.ts
-│   │   │       └── zipValidator.ts
-│   │   ├── routes/             # SvelteKit routes
-│   │   │   ├── +page.svelte    # Upload interface
-│   │   │   ├── maps/
-│   │   │   │   └── +page.svelte  # Maps management
-│   │   │   └── api/            # API endpoints
-│   │   │       ├── presigned-url/+server.ts
-│   │   │       ├── delete-map/+server.ts
-│   │   │       └── retry-map/+server.ts
-│   │   └── hooks.server.ts     # Global hooks (auth)
-│   ├── package.json
-│   ├── vitest.config.ts
-│   └── Dockerfile
-├── backend/
-│   └── lambda/
-│       ├── input_handler/      # Main validation Lambda
-│       └── s3_copy_processor/  # S3 event handler
-├── infra/                      # Terraform infrastructure
-│   ├── main.tf
-│   ├── dynamodb.tf
-│   ├── s3.tf
-│   ├── lambda.tf
-│   ├── ecs.tf
-│   └── ...
-├── docs/                       # Documentation
-│   ├── architecture.md
-│   ├── maintenance-guide.md
-│   ├── monitoring.md
-│   └── developer-onboarding.md (this file)
-└── scripts/                    # Deployment scripts
-    └── deploy.sh
-```
+- **Terraform modules** for all AWS resources
+- **State management** via local state (consider S3 backend for production)
 
 ## Development Workflow
 
@@ -270,11 +289,8 @@ git push origin feature/add-bulk-download
 
 **Lambda Changes:**
 
-1. Edit handler code in `backend/lambda/*/handler.py`
-2. Test locally with sample events:
-   ```bash
-   python handler.py
-   ```
+1. Edit handler code in `infra/lambda/*/handler.py`
+2. Test locally with sample events
 3. Deploy via Terraform (see Deployment section)
 
 **Infrastructure Changes:**
@@ -305,12 +321,7 @@ cd frontend
 npm test                 # Run all tests
 npm run test:watch       # Watch mode
 npm run test:coverage    # Generate coverage report
-npm run test:ui          # Interactive UI
 ```
-
-**Coverage Requirements:**
-- Minimum 70% coverage for lines, functions, branches, statements
-- Coverage report generated in `coverage/` directory
 
 ### Writing Tests
 
@@ -325,45 +336,23 @@ describe('parseMapFilename', () => {
   it('should parse valid filename', () => {
     const result = parseMapFilename('16516_433857.zip');
     expect(result.valid).toBe(true);
-    expect(result.sheet).toBe('16516');
-    expect(result.grid).toBe('433857');
   });
 
   it('should reject invalid extension', () => {
     const result = parseMapFilename('16516_433857.pdf');
     expect(result.valid).toBe(false);
-    expect(result.error).toContain('.zip');
   });
 });
 ```
-
-### Integration Testing
-
-Test against real AWS resources in dev environment:
-
-1. Deploy to `dev` environment
-2. Upload test files via web interface
-3. Verify processing completes successfully
-4. Check DynamoDB entries and S3 outputs
-
-**Test Files:**
-Use these known-good test files:
-- `16516_433857.zip`
-- `16519_453857.zip`
 
 ## Deployment
 
 ### Environments
 
-We have three environments:
-
-- **dev** - Development testing (auto-deployed from `develop` branch)
-- **staging** - Pre-production testing (manual deployment)
+- **staging** - Pre-production testing (eu-west-2)
 - **production** - Live system (manual deployment with approval)
 
-### Deployment Process
-
-#### Frontend Deployment
+### Frontend Deployment
 
 Frontend is deployed as Docker container to ECS:
 
@@ -386,35 +375,27 @@ docker build -t mra-frontend .
 docker tag mra-frontend:latest <ECR_URI>:latest
 
 # Push to ECR
-aws ecr get-login-password --region eu-west-1 | docker login --username AWS --password-stdin <ECR_URI>
+aws ecr get-login-password --region eu-west-2 | docker login --username AWS --password-stdin <ECR_URI>
 docker push <ECR_URI>:latest
 
 # Update ECS service
 aws ecs update-service \
   --cluster mra-mines-cluster-staging \
-  --service mra-frontend-service \
+  --service mra-mines-frontend-staging \
   --force-new-deployment \
-  --region eu-west-1
+  --region eu-west-2
 ```
 
-#### Lambda Deployment
+### Lambda Deployment
 
 Lambda functions are deployed via Terraform:
 
 ```bash
 cd infra
-
-# Package Lambda code
-cd ../backend/lambda/input_handler
-zip -r handler.zip .
-mv handler.zip ../../../infra/build/input_handler.zip
-
-# Deploy with Terraform
-cd ../../../infra
 terraform apply -target=aws_lambda_function.input_handler
 ```
 
-#### Infrastructure Deployment
+### Infrastructure Deployment
 
 For infrastructure changes:
 
@@ -423,30 +404,6 @@ cd infra
 terraform plan -var-file="terraform.tfvars"
 # Review plan carefully
 terraform apply -var-file="terraform.tfvars"
-```
-
-**Important:** Always run `terraform plan` first and review changes before applying.
-
-### Rollback
-
-If deployment fails:
-
-**Frontend:**
-```bash
-# Revert to previous task definition
-aws ecs update-service \
-  --cluster mra-mines-cluster-staging \
-  --service mra-frontend-service \
-  --task-definition mra-frontend-task:PREVIOUS_REVISION
-```
-
-**Lambda:**
-```bash
-# Revert to previous version
-aws lambda update-function-code \
-  --function-name input_handler \
-  --s3-bucket lambda-deployments \
-  --s3-key input_handler-PREVIOUS_VERSION.zip
 ```
 
 ## Common Tasks
@@ -485,78 +442,21 @@ aws lambda update-function-code \
    }
    ```
 
-4. **Add audit logging:**
-   ```typescript
-   import { AuditLog } from '$lib/server/audit-log';
-
-   AuditLog.customEvent({
-     eventType: 'MY_ACTION',
-     userId: locals.user.email,
-     action: 'my_action',
-     result: 'success'
-   });
-   ```
-
-5. **Write tests:**
-   ```typescript
-   // src/routes/api/my-endpoint/+server.test.ts
-   describe('POST /api/my-endpoint', () => {
-     it('should require authentication', async () => {
-       // Test implementation
-     });
-   });
-   ```
-
-### Adding a DynamoDB Index
-
-1. **Edit `infra/dynamodb.tf`:**
-   ```hcl
-   global_secondary_index {
-     name            = "MyNewIndex"
-     hash_key        = "myAttribute"
-     projection_type = "ALL"
-     read_capacity   = 5
-     write_capacity  = 5
-   }
-   ```
-
-2. **Deploy:**
-   ```bash
-   terraform apply -target=aws_dynamodb_table.maps_table
-   ```
-
-3. **Wait for index creation** (can take several minutes)
-
-4. **Update queries:**
-   ```typescript
-   const result = await dynamoDocClient.send(
-     new QueryCommand({
-       TableName: MAPS_TABLE,
-       IndexName: 'MyNewIndex',
-       KeyConditionExpression: 'myAttribute = :value',
-       ExpressionAttributeValues: { ':value': someValue }
-     })
-   );
-   ```
-
 ### Viewing Logs
 
 **Frontend Logs (ECS):**
 ```bash
-aws logs tail /ecs/mra-frontend --follow --region eu-west-1
+aws logs tail /ecs/mra-mines-frontend-staging --follow --region eu-west-2
 ```
 
 **Lambda Logs:**
 ```bash
-aws logs tail /aws/lambda/input_handler --follow --region eu-west-1
+aws logs tail /aws/lambda/mra-mines-input-handler-staging --follow --region eu-west-2
 ```
 
-**Filter by correlation ID:**
+**Processor Logs:**
 ```bash
-aws logs filter-log-events \
-  --log-group-name /ecs/mra-frontend \
-  --filter-pattern "[correlationId=1234567890-abc]" \
-  --region eu-west-1
+aws logs tail /ecs/mra-mines-processor-staging --follow --region eu-west-2
 ```
 
 ### Debugging Failed Jobs
@@ -566,25 +466,19 @@ aws logs filter-log-events \
    aws dynamodb get-item \
      --table-name mra-mines-staging-maps \
      --key '{"mapId":{"S":"map_abc123"},"mapName":{"S":"16516_433857.zip"}}' \
-     --region eu-west-1
+     --region eu-west-2
    ```
 
 2. **Check ECS task logs:**
    ```bash
    aws logs filter-log-events \
-     --log-group-name /ecs/mra-processor \
+     --log-group-name /ecs/mra-mines-processor-staging \
      --filter-pattern "map_abc123" \
-     --region eu-west-1
+     --region eu-west-2
    ```
 
-3. **Retry the job:**
-   - Use the "Retry" button in the web interface, OR
-   - Call the retry API:
-     ```bash
-     curl -X POST https://your-domain.com/api/retry-map \
-       -H "Content-Type: application/json" \
-       -d '{"mapId":"map_abc123","mapName":"16516_433857.zip"}'
-     ```
+3. **Retry via UI or API:**
+   Use the "Retry" button in the web interface or call `/api/retry-map`
 
 ## Troubleshooting
 
@@ -598,7 +492,6 @@ aws logs filter-log-events \
 1. Check DynamoDB throttling metrics in CloudWatch
 2. Verify provisioned capacity is sufficient
 3. Wait for circuit breaker to reset (30-60 seconds)
-4. Check for infrastructure issues
 
 #### "Rate limit exceeded"
 
@@ -606,10 +499,7 @@ aws logs filter-log-events \
 
 **Solution:**
 1. Wait for rate limit window to reset
-2. If legitimate use case, increase limit in `rate-limit.ts`:
-   ```typescript
-   UPLOAD: { maxRequests: 50, windowMs: 60 * 60 * 1000 }
-   ```
+2. If legitimate use case, adjust limit in `rate-limit.ts`
 
 #### "Failed to generate presigned URL"
 
@@ -618,73 +508,25 @@ aws logs filter-log-events \
 **Solution:**
 1. Verify IAM role has `s3:PutObject` permission
 2. Check S3 bucket policy
-3. Verify bucket exists and is accessible
-4. Check CloudWatch logs for detailed error
+3. Check CloudWatch logs for detailed error
 
 #### ECS Task Stuck in PENDING
 
 **Cause:** Insufficient ECS capacity or resource constraints
 
 **Solution:**
-1. Check ECS cluster capacity:
-   ```bash
-   aws ecs describe-clusters \
-     --clusters mra-mines-cluster-staging \
-     --region eu-west-1
-   ```
-2. Increase desired count or instance size
-3. Check for networking/security group issues
-
-#### Frontend Not Loading
-
-**Cause:** ECS service unhealthy or ALB issues
-
-**Solution:**
-1. Check ECS service status:
-   ```bash
-   aws ecs describe-services \
-     --cluster mra-mines-cluster-staging \
-     --services mra-frontend-service \
-     --region eu-west-1
-   ```
-2. Check ALB target health:
-   ```bash
-   aws elbv2 describe-target-health \
-     --target-group-arn <target-group-arn> \
-     --region eu-west-1
-   ```
-3. Check CloudWatch logs for errors
-
-### Debug Mode
-
-Enable verbose logging by setting environment variable:
-
-```bash
-export DEBUG=true
-npm run dev
-```
-
-This enables:
-- Detailed X-Ray tracing logs
-- Circuit breaker state changes
-- Rate limiting decisions
-- Audit log entries
+1. Check ECS cluster capacity
+2. Verify security groups allow outbound traffic
+3. Check for networking/subnet issues
 
 ## Code Style Guidelines
 
 ### TypeScript/JavaScript
 
-**Formatting:**
-- Use **tabs** for indentation (project convention)
+- Use **tabs** for indentation
 - Max line length: 120 characters
 - Use single quotes for strings
 - Semicolons required
-
-**Naming:**
-- `camelCase` for variables and functions
-- `PascalCase` for classes and types
-- `UPPER_SNAKE_CASE` for constants
-- Prefix private members with `_` if needed
 
 **Example:**
 ```typescript
@@ -706,7 +548,6 @@ async function processMapUpload(file: File): Promise<MapMetadata> {
 
 ### Python
 
-**Formatting:**
 - Use **4 spaces** for indentation
 - Max line length: 100 characters
 - Follow PEP 8
@@ -717,7 +558,7 @@ MAX_RETRIES = 3
 
 def process_map(map_id: str, input_path: str) -> dict:
     """
-    Process a mine map PDF.
+    Process a mine map file.
 
     Args:
         map_id: Unique map identifier
@@ -726,7 +567,6 @@ def process_map(map_id: str, input_path: str) -> dict:
     Returns:
         Processing result metadata
     """
-    # Process...
     return {"status": "completed"}
 ```
 
@@ -745,51 +585,13 @@ const PRESIGNED_URL_EXPIRY_SECONDS = 900;
 const PRESIGNED_URL_EXPIRY_SECONDS = 900;
 ```
 
-**Documentation comments:**
-```typescript
-/**
- * Validates mine map filename format.
- * Expected format: {sheet}_{grid}.zip (e.g., "16516_433857.zip")
- *
- * @param filename - The filename to validate
- * @returns Validation result with parsed components
- */
-export function parseMapFilename(filename: string): ParseResult {
-  // Implementation...
-}
-```
-
-### Error Handling
-
-**Always provide context in errors:**
-
-```typescript
-// Good: Provides context
-throw new Error(`Failed to process map ${mapId}: ${error.message}`);
-
-// Bad: Vague
-throw new Error('Processing failed');
-```
-
-**Use try-catch for async operations:**
-
-```typescript
-try {
-	await dynamoDocClient.send(new PutCommand({ ... }));
-} catch (error) {
-	console.error(`[mapId=${mapId}] DynamoDB write failed`, error);
-	throw error;
-}
-```
-
 ## Useful Resources
 
 ### Internal Documentation
 
 - **Architecture Overview:** `docs/architecture.md`
 - **Maintenance Guide:** `docs/maintenance-guide.md`
-- **Monitoring Guide:** `docs/monitoring.md`
-- **API Documentation:** `docs/api-reference.md`
+- **Troubleshooting:** `docs/troubleshooting.md`
 
 ### External Resources
 
@@ -807,23 +609,15 @@ try {
 **Testing:**
 - [Vitest Docs](https://vitest.dev/)
 
-### Team Contacts
-
-- **Tech Lead:** [Name] - Infrastructure and architecture questions
-- **Frontend Lead:** [Name] - SvelteKit and UI questions
-- **Backend Lead:** [Name] - Lambda and ECS questions
-- **DevOps:** [Name] - Deployment and infrastructure issues
-
 ### Getting Help
 
 1. **Check documentation** in `docs/` directory first
 2. **Search CloudWatch Logs** for error messages
 3. **Ask in team Slack channel** #mra-mines-dev
 4. **Create GitHub issue** for bugs or feature requests
-5. **Schedule pairing session** with team member for complex issues
 
 ---
 
 **Welcome to the team! Happy coding!**
 
-For questions or suggestions about this guide, please update it directly or reach out to the team lead.
+**Last Updated:** 2025-11-25

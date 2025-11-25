@@ -4,8 +4,8 @@
 
 The MRA Mines Map application is a cloud-native web application deployed on AWS, designed for processing and visualizing mining map data. The system uses a serverless and container-based architecture for scalability, cost-efficiency, and ease of maintenance.
 
-**Last Updated:** 2025-11-14
-**Architecture Version:** 2.1 (ALB-Direct + Performance Optimized)
+**Last Updated:** 2025-11-25
+**Architecture Version:** 3.0 (ALB-Direct + Serverless Processing)
 **AWS Region:** eu-west-2 (London)
 
 ---
@@ -13,60 +13,127 @@ The MRA Mines Map application is a cloud-native web application deployed on AWS,
 ## Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                           Internet Users                             │
-└────────────────────────────┬────────────────────────────────────────┘
-                             │
-                             │ HTTPS (self-signed cert)
-                             │ HTTP → 301 Redirect to HTTPS
-                             ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                  Application Load Balancer (ALB)                     │
-│  • HTTPS Listener (443) - Self-signed Certificate                   │
-│  • HTTP Listener (80) - Redirects to HTTPS                          │
-│  • Health Checks - Port 3000, Path: /                               │
-│  • Target Group - ECS Tasks (IP mode)                               │
-└────────────────────────────┬────────────────────────────────────────┘
-                             │
-                             │ HTTP (internal)
-                             ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    ECS Fargate Service (Frontend)                    │
-│  • Task Count: 1 (auto-healing via ALB health checks)               │
-│  • Container: SvelteKit Application (Port 3000)                     │
-│  • Resources: 0.25 vCPU, 512 MB RAM                                 │
-│  • Network: awsvpc mode, Public IP enabled                          │
-└────┬────────────────────────┬───────────────────┬──────────────────┘
-     │                        │                   │
-     │ API Calls              │ API Calls         │ OAuth
-     ▼                        ▼                   ▼
-┌────────────┐      ┌──────────────────┐   ┌──────────────┐
-│  DynamoDB  │      │   S3 Buckets     │   │   Cognito    │
-│  Tables    │      │  (Input/Output)  │   │  User Pool   │
-└────────────┘      └──────────────────┘   └──────────────┘
-     │                        │
-     │ Read/Write             │ S3 Events
-     ▼                        ▼
-┌────────────────────────────────────────────────────────────┐
-│               Lambda Functions (Event-Driven)               │
-│  • input-handler: Triggered on map upload                  │
-│  • output-handler: Triggered on processing complete        │
-│  • mock-ecs: Simulates ECS task for testing                │
-│  • s3-copy-processor: Handles S3 object operations         │
-│  • pre-auth-trigger: Validates Cognito authentication      │
-└───────────────────────┬────────────────────────────────────┘
-                        │
-                        │ Triggers ECS Tasks
-                        ▼
-┌────────────────────────────────────────────────────────────┐
-│          ECS Fargate Tasks (Map Processor)                 │
-│  • On-Demand Processing (triggered by Lambda)              │
-│  • Container: Python map processing (EasyOCR + OpenCV)     │
-│  • Resources: 8 vCPU, 16 GB RAM (Performance Optimized)    │
-│  • Processing Time: ~5-10 minutes per map                  │
-│  • Docker Image: From separate mra-mine-plans-ds repo      │
-└────────────────────────────────────────────────────────────┘
+                                    INTERNET USERS
+                                          |
+                                          | HTTPS
+                                          v
+                    +---------------------------------------------+
+                    |        Application Load Balancer (ALB)      |
+                    |  - HTTPS Listener (443) with ACM Cert       |
+                    |  - HTTP Listener (80) -> HTTPS Redirect     |
+                    |  - Health Checks: Port 3000, Path: /        |
+                    +---------------------------------------------+
+                                          |
+                                          | HTTP (internal)
+                                          v
+                    +---------------------------------------------+
+                    |         ECS Fargate (Frontend Service)      |
+                    |  - SvelteKit SSR Application                |
+                    |  - Port: 3000                               |
+                    |  - 0.25 vCPU, 512 MB RAM                    |
+                    +---------------------------------------------+
+                           |              |              |
+           +---------------+              |              +---------------+
+           |                              |                              |
+           v                              v                              v
+    +-----------+               +-----------------+              +-------------+
+    |  Cognito  |               |   S3 Buckets    |              |  DynamoDB   |
+    | User Pool |               | Input / Output  |              |   Tables    |
+    +-----------+               +-----------------+              +-------------+
+                                        |
+                                        | S3 Event Trigger
+                                        v
+                    +---------------------------------------------+
+                    |          Lambda: input_handler              |
+                    |  - Validates uploaded files                 |
+                    |  - Creates job/map records in DynamoDB      |
+                    |  - Launches ECS processor task              |
+                    +---------------------------------------------+
+                                        |
+                                        | Triggers ECS Task
+                                        v
+                    +---------------------------------------------+
+                    |        ECS Fargate (Processor Task)         |
+                    |  - Python + EasyOCR + OpenCV                |
+                    |  - 8 vCPU, 16 GB RAM                        |
+                    |  - On-demand execution per file             |
+                    |  - Docker Image: mra-mine-plans-ds repo     |
+                    +---------------------------------------------+
+                                        |
+                                        | Updates status
+                                        v
+                    +---------------------------------------------+
+                    |          Lambda: output_handler             |
+                    |  - Triggered on processing complete         |
+                    |  - Updates job status in DynamoDB           |
+                    +---------------------------------------------+
 ```
+
+---
+
+## Project Structure
+
+```
+deployment-package/
+├── frontend/                    # SvelteKit web application
+│   ├── src/
+│   │   ├── routes/             # SvelteKit routes & API endpoints
+│   │   │   ├── +page.svelte    # Main upload interface
+│   │   │   ├── maps/           # Maps management page
+│   │   │   ├── auth/           # Authentication routes
+│   │   │   └── api/            # API endpoints
+│   │   │       ├── presigned-url/    # Generate S3 upload URLs
+│   │   │       ├── delete-map/       # Delete map files
+│   │   │       ├── retry-map/        # Retry failed processing
+│   │   │       ├── download-url/     # Generate download URLs
+│   │   │       ├── bulk-download/    # Bulk download operations
+│   │   │       ├── batch-operations/ # Batch operations
+│   │   │       ├── validate-map/     # Validate map files
+│   │   │       └── webhooks/         # Webhook endpoints
+│   │   └── lib/
+│   │       ├── server/         # Server-side utilities
+│   │       │   ├── dynamo.ts   # DynamoDB client
+│   │       │   ├── s3.ts       # S3 client
+│   │       │   ├── cognito.ts  # Cognito authentication
+│   │       │   ├── circuit-breaker.ts
+│   │       │   ├── rate-limit.ts
+│   │       │   ├── audit-log.ts
+│   │       │   └── webhook.ts
+│   │       └── utils/          # Shared utilities
+│   ├── Dockerfile
+│   ├── build_and_push.sh       # Deploy script
+│   └── package.json
+│
+├── infra/                       # Terraform infrastructure
+│   ├── lambda/                  # Lambda function code
+│   │   ├── input_handler/      # S3 upload trigger handler
+│   │   ├── output_handler/     # Processing complete handler
+│   │   ├── s3_copy_processor/  # S3 copy operations
+│   │   └── pre_auth_trigger/   # Cognito pre-auth validation
+│   ├── main.tf                 # Provider configuration
+│   ├── vpc.tf                  # Networking (VPC, subnets)
+│   ├── alb.tf                  # Application Load Balancer
+│   ├── ecs.tf                  # ECS processor task definition
+│   ├── frontend_ecs_simple.tf  # Frontend ECS service
+│   ├── cognito.tf              # User authentication
+│   ├── dynamodb.tf             # Database tables
+│   ├── s3.tf                   # Storage buckets
+│   ├── lambda.tf               # Lambda functions
+│   ├── iam.tf                  # IAM roles and policies
+│   ├── variables.tf            # Configuration variables
+│   └── outputs.tf              # Terraform outputs
+│
+├── scripts/                     # Deployment scripts
+│   └── deploy.sh
+│
+├── docs/                        # Documentation
+│
+└── backend/                     # (Empty - serverless architecture)
+```
+
+**Note:** The `backend/` folder is empty because the application uses a **serverless architecture**. All backend logic is handled by:
+- Lambda functions (in `infra/lambda/`)
+- ECS processor tasks (Docker image from separate `mra-mine-plans-ds` repository)
 
 ---
 
@@ -76,145 +143,307 @@ The MRA Mines Map application is a cloud-native web application deployed on AWS,
 - **Entry Point:** Application Load Balancer (HTTPS + HTTP redirect)
 - **Frontend:** ECS Fargate (1 task, 0.25 vCPU, 512 MB, auto-refresh)
 - **Authentication:** AWS Cognito (OAuth 2.0)
-- **Database:** DynamoDB (2 tables, on-demand)
-- **Storage:** S3 (2 buckets with lifecycle rules)
+- **Database:** DynamoDB (2 tables, on-demand billing)
+- **Storage:** S3 (2 buckets - input and output)
 - **Processing:** Lambda + ECS Fargate (8 vCPU, 16 GB RAM)
-- **Monthly Cost:** ~$35-60 (increased due to ECS upgrade)
+- **Monthly Cost:** ~$35-60
 
 **Key Features:**
-- HTTPS with self-signed certificate
+- HTTPS with ACM certificate
 - Auto-healing via ALB health checks
-- OAuth 2.0 authentication
-- Event-driven processing
+- OAuth 2.0 authentication with Cognito
+- Event-driven processing pipeline
 - Real-time UI updates (10-second auto-refresh)
 - High-performance map processing (8 vCPU/16GB)
-- Cost-optimized (no CloudFront, no NAT Gateway)
-
-**Limitations:**
-- Self-signed certificate (browser warnings)
-- Single region deployment
-- No global CDN
-
-**Upgrade Path:**
-See `docs/CUSTOM_DOMAIN_SETUP.md` for production-ready HTTPS with custom domain + ACM certificate (~$13/year).
+- Rate limiting and circuit breaker patterns
+- Batch upload support (up to 20 files)
+- Retry logic for failed processing
 
 ---
 
-## For Full Details
+## Component Details
 
-This is a summary document. For comprehensive architecture documentation including:
-- Detailed component descriptions
-- Data flow diagrams
-- Security considerations
-- Scaling strategies  
-- Cost analysis
-- Migration notes
+### 1. Frontend (ECS Fargate)
 
-See the complete architecture documentation (to be created) or refer to:
-- Terraform configuration files in `infra/`
-- Custom domain setup guide in `docs/CUSTOM_DOMAIN_SETUP.md`
-- Individual README files in each component directory
+**Location:** `deployment-package/frontend/`
 
----
+**Technology:** SvelteKit with TypeScript
 
----
+**Specifications:**
+- CPU: 0.25 vCPU (256 units)
+- Memory: 512 MB
+- Port: 3000
+- Network: awsvpc mode with public IP
 
-## Processing Components
+**Key Routes:**
+| Route | Purpose |
+|-------|---------|
+| `/` | Main upload interface |
+| `/maps` | Maps management and download |
+| `/auth/callback` | Cognito OAuth callback |
 
-### Map Processing Pipeline
+**API Endpoints:**
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/presigned-url` | POST | Generate S3 upload URLs |
+| `/api/delete-map` | POST | Delete map files |
+| `/api/retry-map` | POST | Retry failed processing |
+| `/api/download-url` | POST | Generate download URLs |
+| `/api/bulk-download` | POST | Bulk download operations |
+| `/api/batch-operations` | POST | Batch delete/retry |
+| `/api/validate-map` | POST | Validate map files |
+| `/api/webhooks` | POST | External webhook handling |
 
-The system uses two separate but coordinated processing components:
+**Server Utilities:**
+- `dynamo.ts` - DynamoDB document client
+- `s3.ts` - S3 client for presigned URLs
+- `cognito.ts` - User authentication
+- `circuit-breaker.ts` - Fault tolerance for AWS services
+- `rate-limit.ts` - Request rate limiting (20 uploads/hour)
+- `audit-log.ts` - Operation logging
+- `tracing.ts` - Request tracing
 
-#### 1. ECS Processor (In deployment-package/infra/)
-**Location:** Defined in `deployment-package/infra/ecs.tf`
+### 2. Lambda Functions
 
-**Configuration:**
-- **CPU:** 8 vCPU (8192 units)
-- **Memory:** 16 GB (16384 MB)
-- **Network Mode:** awsvpc
-- **Launch Type:** FARGATE
-
-**Purpose:** Runs the actual map processing Docker container
-
-**Docker Image Source:** Built from separate repository (`mra-mine-plans-ds`)
-- Contains EasyOCR for text recognition
-- Uses OpenCV for image processing
-- Handles map extraction and analysis
-
-**Environment Variables:**
-- `INPUT_BUCKET` - S3 bucket for uploaded maps
-- `OUTPUT_BUCKET` - S3 bucket for processed results
-- `JOBS_TABLE_NAME` - DynamoDB table for job tracking
-- `MAPS_TABLE_NAME` - DynamoDB table for map metadata
-- `AWS_DEFAULT_REGION` - Current AWS region
-
-#### 2. Lambda Functions (In deployment-package/infra/lambda/)
 **Location:** `deployment-package/infra/lambda/`
 
-**Functions:**
-1. **input-handler** (`lambda/input_handler/handler.py`)
-   - Triggered by S3 upload events
-   - Creates job record in DynamoDB
-   - Launches ECS processor task
-   - Handles initial validation
+#### input_handler
+- **Trigger:** S3 PUT event on input bucket
+- **Purpose:**
+  - Validate uploaded ZIP file format
+  - Create job record in DynamoDB (status: QUEUED)
+  - Create map record in DynamoDB
+  - Launch ECS processor task
+  - Handle retry scenarios for failed uploads
+- **Timeout:** 60 seconds
+- **Memory:** 512 MB
 
-2. **output-handler** (`lambda/output_handler/`)
-   - Triggered when processing completes
-   - Updates job status
-   - Processes final results
+#### output_handler
+- **Trigger:** S3 PUT event on output bucket
+- **Purpose:**
+  - Update job status to COMPLETED
+  - Update map metadata with output location
+- **Timeout:** 30 seconds
+- **Memory:** 256 MB
 
-3. **s3-copy-processor** (`lambda/s3_copy_processor/`)
-   - Handles S3 object copy operations
-   - Manages file transfers between buckets
+#### s3_copy_processor
+- **Trigger:** Direct Lambda invocation
+- **Purpose:** Fallback processor when ECS is unavailable
+- **Timeout:** 120 seconds
+- **Memory:** 512 MB
 
-4. **pre-auth-trigger** (`lambda/pre_auth_trigger/`)
-   - Cognito pre-authentication trigger
-   - Validates user credentials
-   - Custom authentication logic
+#### pre_auth_trigger
+- **Trigger:** Cognito pre-authentication
+- **Purpose:** Custom authentication validation
+- **Timeout:** 10 seconds
+- **Memory:** 128 MB
 
-**Resource Configuration:**
-- Memory: 128-512 MB per function
-- Timeout: 30-900 seconds (varies by function)
-- Runtime: Python 3.11+
+### 3. ECS Processor (Map Processing)
 
-### Processing Flow
+**Location:** Defined in `deployment-package/infra/ecs.tf`
+**Docker Image:** Built from separate `mra-mine-plans-ds` repository
 
-```
-1. User uploads map file via frontend
-   ↓
-2. S3 upload event triggers input-handler Lambda
-   ↓
-3. Lambda creates job record in DynamoDB (status: "submitted")
-   ↓
-4. Lambda launches ECS Fargate task (processor)
-   ↓
-5. ECS task downloads map from S3 input bucket
-   ↓
-6. ECS task processes map (OCR, extraction, analysis)
-   ↓
-7. ECS task uploads results to S3 output bucket
-   ↓
-8. ECS task updates DynamoDB (status: "completed")
-   ↓
-9. S3 output event triggers output-handler Lambda
-   ↓
-10. Frontend auto-refresh displays updated status
-```
+**Specifications:**
+- CPU: 8 vCPU (8192 units)
+- Memory: 16 GB (16384 MB)
+- Network Mode: awsvpc
+- Launch Type: FARGATE
 
-### Performance Characteristics
+**Processing Stack:**
+- Python 3.11+
+- EasyOCR for text recognition
+- OpenCV for image processing
+- GDAL for geospatial operations
 
-**Processing Time (Current - 8 vCPU/16GB):**
+**Environment Variables:**
+| Variable | Description |
+|----------|-------------|
+| `INPUT_BUCKET` | S3 bucket for uploaded maps |
+| `OUTPUT_BUCKET` | S3 bucket for processed results |
+| `JOBS_TABLE_NAME` | DynamoDB table for job tracking |
+| `MAPS_TABLE_NAME` | DynamoDB table for map metadata |
+| `JOB_ID` | Current job identifier |
+| `MAP_ID` | Current map identifier |
+| `INPUT_KEY` | S3 key of input file |
+| `MAP_NAME` | Original filename |
+
+**Processing Time:**
 - Small maps (<5 MB): ~2-3 minutes
 - Medium maps (5-20 MB): ~5-7 minutes
 - Large maps (>20 MB): ~10-15 minutes
 
-**Improvement from Upgrade:**
-- Previous: 4 vCPU / 8 GB
-- Current: 8 vCPU / 16 GB
-- Expected speedup: 30-50% reduction in processing time
+### 4. Storage (S3)
+
+**Input Bucket** (`mra-mines-{env}-input`)
+- Stores uploaded ZIP files
+- Lifecycle: Files deleted after 90 days
+- Versioning: Enabled
+- S3 Event: Triggers input_handler Lambda on upload
+
+**Output Bucket** (`mra-mines-{env}-output`)
+- Stores processed results
+- Lifecycle: Configurable retention
+- Versioning: Enabled
+
+### 5. Database (DynamoDB)
+
+**maps Table**
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `mapId` | String (PK) | Hash-based unique ID |
+| `mapName` | String (SK) | Sanitized filename |
+| `ownerEmail` | String | User who uploaded |
+| `status` | String | QUEUED, DISPATCHED, PROCESSING, COMPLETED, FAILED |
+| `jobId` | String | Reference to processing job |
+| `sizeBytes` | Number | File size |
+| `createdAt` | String | ISO timestamp |
+| `updatedAt` | String | ISO timestamp |
+| `errorMessage` | String | Error details (if failed) |
+| `retryCount` | Number | Number of retry attempts |
+
+**map-jobs Table**
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `jobId` | String (PK) | Unique job identifier |
+| `submittedBy` | String | User email |
+| `status` | String | QUEUED, DISPATCHED, PROCESSING, COMPLETED, FAILED |
+| `batchSize` | Number | Total files in batch |
+| `processedCount` | Number | Successfully processed |
+| `failedCount` | Number | Failed processing |
+| `createdAt` | String | ISO timestamp |
+
+### 6. Authentication (Cognito)
+
+- OAuth 2.0 / OpenID Connect
+- Hosted UI for login
+- Pre-authentication Lambda trigger
+- Session management via SvelteKit
 
 ---
 
-**Document Version:** 2.1
-**Last Updated:** 2025-11-14
+## Data Flow
+
+### Upload Flow
+
+```
+1. User visits frontend (via ALB)
+   └─> SvelteKit renders upload page
+       └─> User authenticates via Cognito
+
+2. User selects files for upload
+   └─> Frontend validates filenames (SeamID_SheetNumber.zip)
+       └─> Frontend calculates file hashes for deduplication
+
+3. Frontend requests presigned URLs
+   └─> POST /api/presigned-url
+       └─> Server checks rate limits (20/hour)
+           └─> Server checks for duplicates in DynamoDB
+               └─> Server generates presigned S3 URLs
+
+4. Browser uploads directly to S3
+   └─> PUT to presigned URL with metadata
+       └─> S3 triggers input_handler Lambda
+
+5. input_handler Lambda processes upload
+   └─> Validates filename format (backend validation)
+       └─> Creates/updates job record (status: QUEUED)
+           └─> Creates/updates map record (status: QUEUED)
+               └─> Launches ECS Fargate task
+
+6. ECS processor runs
+   └─> Downloads ZIP from S3 input bucket
+       └─> Processes map (OCR, extraction, analysis)
+           └─> Updates DynamoDB (status: PROCESSING)
+               └─> Uploads results to S3 output bucket
+                   └─> Updates DynamoDB (status: COMPLETED)
+
+7. User views results
+   └─> Frontend polls DynamoDB (10-second interval)
+       └─> Displays updated status
+           └─> Generates presigned URL for download
+```
+
+### Filename Validation
+
+Files must follow the format: `SeamID_SheetNumber.zip`
+
+- **SeamID:** Alphanumeric identifier (e.g., "16516")
+- **Underscore:** Mandatory separator
+- **SheetNumber:** Exactly 6 digits (e.g., "433857" or "43_3857")
+
+Examples:
+- Valid: `16516_433857.zip`, `ABC123_433857.zip`, `43_43_3857.zip`
+- Invalid: `test.zip`, `map_file.zip`, `16516.zip`
+
+Validation occurs at two levels:
+1. **Frontend:** Immediate user feedback (`filenameParser.ts`)
+2. **Lambda:** Backend enforcement (catches direct S3 uploads)
+
+---
+
+## Security Model
+
+### Network Security
+- ALB provides DDoS protection
+- Security groups restrict access by port
+- VPC isolates resources
+- S3 buckets block public access
+
+### Authentication & Authorization
+- Cognito handles user authentication
+- JWT tokens validate API requests
+- Pre-auth Lambda for custom validation
+- Rate limiting prevents abuse
+
+### Data Protection
+- HTTPS/TLS encryption in transit
+- S3 server-side encryption (AES-256) at rest
+- DynamoDB encryption enabled by default
+
+---
+
+## Cost Breakdown
+
+### Monthly Cost Estimate (Moderate Usage)
+
+| Service | Cost |
+|---------|------|
+| ECS Fargate (Frontend) | $15-25 |
+| ECS Fargate (Processor) | $5-15 |
+| DynamoDB | $2-10 |
+| S3 Storage | $1-5 |
+| Lambda | $0-5 |
+| ALB | $16-20 |
+| ECR | $1 |
+| **Total** | **$35-60/month** |
+
+---
+
+## Terraform Infrastructure Files
+
+| File | Purpose |
+|------|---------|
+| `main.tf` | AWS provider configuration |
+| `vpc.tf` | VPC, subnets, internet gateway |
+| `alb.tf` | Application Load Balancer, listeners, target groups |
+| `ecs.tf` | Processor task definition, ECR repository |
+| `frontend_ecs_simple.tf` | Frontend ECS service and task |
+| `cognito.tf` | User pool, app client, domain |
+| `cognito_identity.tf` | Identity pool for AWS credentials |
+| `dynamodb.tf` | Maps and jobs tables |
+| `s3.tf` | Input and output buckets |
+| `lambda.tf` | Lambda functions and triggers |
+| `lambda_pre_auth.tf` | Cognito pre-auth trigger |
+| `iam.tf` | IAM roles and policies |
+| `iam_data.tf` | IAM data sources |
+| `acm.tf` | SSL/TLS certificates |
+| `route53.tf` | DNS configuration |
+| `webhooks.tf` | Webhook infrastructure |
+| `variables.tf` | Input variables |
+| `outputs.tf` | Output values |
+
+---
+
+**Document Version:** 3.0
+**Last Updated:** 2025-11-25
 **Maintained By:** MRA Mines DevOps Team

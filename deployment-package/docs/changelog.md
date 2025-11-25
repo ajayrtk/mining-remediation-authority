@@ -1,5 +1,40 @@
 # Changelog
 
+## 2025-11-25 - Documentation Update & Cleanup
+
+### Documentation Updated
+- **architecture.md** - Complete rewrite with accurate project structure
+  - Updated architecture diagram to reflect actual codebase
+  - Added detailed project structure tree
+  - Documented all API endpoints
+  - Added Lambda functions details
+  - Updated data flow documentation
+  - Corrected component specifications
+
+- **README.md** - Updated documentation index
+  - Added Developer Onboarding to navigation
+  - Updated document status table
+  - Clarified serverless architecture (empty backend folder)
+  - Added common FAQ about project structure
+
+- **developer-onboarding.md** - Complete rewrite
+  - Corrected project structure
+  - Updated local development setup for eu-west-2
+  - Fixed Lambda function locations (infra/lambda/)
+  - Added accurate API endpoint documentation
+  - Clarified ECS processor is in separate repo
+
+### Removed
+- **arc-old.md** - Removed outdated architecture document
+- **backend/** - Removed empty folder (serverless architecture, Lambda functions are in infra/lambda/)
+
+### Notes
+- The application uses serverless architecture
+- Backend logic is in Lambda functions (`infra/lambda/`) and SvelteKit API routes (`frontend/src/routes/api/`)
+- ECS processor Docker image is built from separate `mra-mine-plans-ds` repository
+
+---
+
 ## 2025-11-23 - Phase 4: Bug Fixes & Feature Completion
 
 ### Fixed
