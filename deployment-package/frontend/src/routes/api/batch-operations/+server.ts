@@ -1,14 +1,3 @@
-/**
- * Batch operations API
- *
- * Allows performing operations on multiple maps at once:
- * - Bulk delete
- * - Bulk retry
- * - Bulk status check
- *
- * Uses DynamoDB batch operations for efficiency.
- */
-
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { QueryCommand, DeleteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
@@ -42,9 +31,6 @@ interface BatchResult {
 	}>;
 }
 
-/**
- * POST - Perform batch operation
- */
 export const POST: RequestHandler = async ({ request, locals }) => {
 	const correlationId = request.headers.get('X-Correlation-ID') || `server-${Date.now()}`;
 
@@ -136,9 +122,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 };
 
-/**
- * Batch delete maps
- */
 async function batchDeleteMaps(
 	maps: Array<{ mapId: string; mapName: string }>,
 	userId: string,
@@ -293,9 +276,6 @@ async function batchDeleteMaps(
 	};
 }
 
-/**
- * Batch retry maps
- */
 async function batchRetryMaps(
 	maps: Array<{ mapId: string; mapName: string }>,
 	userId: string,
@@ -411,9 +391,6 @@ async function batchRetryMaps(
 	};
 }
 
-/**
- * Batch get status
- */
 async function batchGetStatus(
 	maps: Array<{ mapId: string; mapName: string }>,
 	userId: string,

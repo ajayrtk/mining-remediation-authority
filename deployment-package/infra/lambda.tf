@@ -1,6 +1,3 @@
-# Lambda functions handle file uploads and processing workflow
-
-# Input handler - triggered when a ZIP file is uploaded to the input bucket
 data "archive_file" "input_handler" {
 	type        = "zip"
 	source_dir  = "${path.module}/lambda/input_handler"
@@ -14,7 +11,7 @@ resource "aws_lambda_function" "input_handler" {
 	role          = local.input_handler_role_arn
 	source_code_hash = data.archive_file.input_handler.output_base64sha256
 	filename         = data.archive_file.input_handler.output_path
-	timeout          = 300  # 5 minutes - handles validation, metadata extraction, and ECS launch for large files
+	timeout          = 300
 	environment {
 		variables = {
 			JOBS_TABLE_NAME = aws_dynamodb_table.map_jobs.name
@@ -38,7 +35,6 @@ resource "aws_lambda_permission" "allow_input_bucket" {
 	source_arn    = aws_s3_bucket.map_input.arn
 }
 
-# Output handler - triggered when processed files appear in the output bucket
 data "archive_file" "output_handler" {
 	type        = "zip"
 	source_dir  = "${path.module}/lambda/output_handler"
@@ -70,7 +66,6 @@ resource "aws_lambda_permission" "allow_output_bucket" {
 	source_arn    = aws_s3_bucket.map_outputs.arn
 }
 
-# S3 copy processor - handles copying files between buckets during processing
 data "archive_file" "s3_copy_processor" {
 	type        = "zip"
 	source_dir  = "${path.module}/lambda/s3_copy_processor"

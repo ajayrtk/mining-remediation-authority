@@ -1,9 +1,4 @@
-/**
- * Simple in-memory rate limiter for API endpoints
- *
- * Prevents abuse by limiting requests per user per time window
- * Uses sliding window algorithm for accurate rate limiting
- */
+// In-memory rate limiter with sliding window algorithm
 
 interface RateLimitEntry {
 	count: number;
@@ -18,10 +13,6 @@ const rateLimitStore = new Map<string, RateLimitEntry>();
 let lastCleanup = Date.now();
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
-/**
- * Lazy cleanup of expired entries (called on each rate limit check)
- * More efficient than setInterval in serverless environments
- */
 function cleanupExpiredEntries(): void {
 	const now = Date.now();
 
@@ -40,32 +31,18 @@ function cleanupExpiredEntries(): void {
 }
 
 export interface RateLimitConfig {
-	/** Maximum number of requests allowed in the time window */
 	maxRequests: number;
-	/** Time window in milliseconds */
 	windowMs: number;
-	/** Optional custom key function (defaults to user email) */
 	keyFunction?: (identifier: string) => string;
 }
 
 export interface RateLimitResult {
-	/** Whether the request is allowed */
 	allowed: boolean;
-	/** Number of requests remaining in current window */
 	remaining: number;
-	/** Time when the rate limit resets (Unix timestamp) */
 	resetTime: number;
-	/** Total limit */
 	limit: number;
 }
 
-/**
- * Check if a request should be rate limited
- *
- * @param identifier - Unique identifier (usually user email)
- * @param config - Rate limit configuration
- * @returns Rate limit result with allowed status and metadata
- */
 export function checkRateLimit(
 	identifier: string,
 	config: RateLimitConfig
@@ -103,31 +80,23 @@ export function checkRateLimit(
 	};
 }
 
-/**
- * Preset rate limit configurations for common use cases
- */
 export const RateLimitPresets = {
-	/** Strict limit for expensive operations (50 requests per minute) */
 	STRICT: {
 		maxRequests: 50,
 		windowMs: 60 * 1000
 	},
-	/** Standard limit for normal API endpoints (300 requests per minute) */
 	STANDARD: {
 		maxRequests: 300,
 		windowMs: 60 * 1000
 	},
-	/** API limit for general API operations (500 requests per minute) */
 	API: {
 		maxRequests: 500,
 		windowMs: 60 * 1000
 	},
-	/** Generous limit for lightweight operations (1500 requests per minute) */
 	GENEROUS: {
 		maxRequests: 1500,
 		windowMs: 60 * 1000
 	},
-	/** Upload limit (100 uploads per hour) */
 	UPLOAD: {
 		maxRequests: 100,
 		windowMs: 60 * 60 * 1000

@@ -7,12 +7,12 @@ This package contains everything needed to deploy the MRA Mines Map application 
 ### Key Features
 - **Secure Authentication**: AWS Cognito with OAuth 2.0
 - **Scalable Processing**: ECS Fargate for on-demand computing
-- **Global CDN**: CloudFront for HTTPS and fast content delivery
+- **HTTPS Access**: Application Load Balancer with SSL/TLS
 - **Serverless Processing**: Lambda functions for automated workflows
 - **Managed Storage**: S3 for files, DynamoDB for metadata
 
 ### Estimated Monthly Cost
-**$25-56/month** for moderate usage (low traffic, ~10-50 users)
+**$32-62/month** for moderate usage (low traffic, ~10-50 users)
 
 ---
 
@@ -40,9 +40,8 @@ cd infra
 nano terraform.tfvars
 
 # Minimum required changes:
-# - aws_region = "eu-west-1"
+# - aws_region = "eu-west-2"
 # - use_existing_iam_roles = true (if IAM roles already exist)
-# - cognito_callback_urls (update with CloudFront URL after deployment)
 ```
 
 **3. Deploy:**
@@ -60,16 +59,18 @@ nano terraform.tfvars
 deployment-package/
 ├── infra/                          # Terraform infrastructure code
 │   ├── *.tf                        # Resource definitions
-│   └── build_and_push.sh           # Container build script
+│   ├── lambda/                     # Lambda function source code
+│   │   ├── input_handler/          # S3 upload processor
+│   │   ├── output_handler/         # Results processor
+│   │   ├── s3_copy_processor/      # File copy utility
+│   │   ├── ecs_state_handler/      # ECS event handler
+│   │   └── pre_auth_trigger/       # Cognito pre-auth Lambda
+│   └── terraform.tfvars.example    # Configuration template
 │
 ├── frontend/                       # SvelteKit web application
 │   ├── src/                        # Application source code
-│   └── Dockerfile                  # Container definition
-│
-├── backend/                        # Lambda functions
-│   ├── lambda/input-handler/       # S3 upload processor
-│   ├── lambda/output-handler/      # Results processor
-│   └── lambda/s3-copy-processor/   # File copy utility
+│   ├── Dockerfile                  # Container definition
+│   └── build_and_push.sh           # Frontend container build script
 │
 ├── scripts/
 │   ├── setup.sh                    # Prerequisites checker
@@ -77,11 +78,10 @@ deployment-package/
 │   └── cleanup.sh                  # Resource cleanup/destroy
 │
 ├── docs/
-│   ├── deployment-guide.md         # Step-by-step deployment
 │   ├── architecture.md             # System architecture
-│   └── maintenance-guide.md        # Operations & maintenance
+│   ├── deployment-guide.md         # Detailed deployment steps
+│   └── troubleshooting.md          # Common issues and solutions
 │
-├── infra/terraform.tfvars.example  # Configuration template
 └── README.md                       # This file
 ```
 
@@ -90,58 +90,35 @@ deployment-package/
 ## Architecture Overview
 
 ```
-User → CloudFront (HTTPS) → ECS Fargate (Frontend)
-                                ↓
-                            Cognito (Auth)
-                                ↓
-                    S3 ← → Lambda ← → DynamoDB
-                                ↓
-                        ECS Fargate (Processor)
+User → ALB (HTTPS) → ECS Fargate (Frontend)
+                           ↓
+                       Cognito (Auth)
+                           ↓
+               S3 ← → Lambda ← → DynamoDB
+                           ↓
+                   ECS Fargate (Processor)
 ```
 
 **Key Components:**
-- **CloudFront**: Global CDN with HTTPS
-- **ECS Fargate**: Containerized frontend (SvelteKit)
+- **ALB**: Application Load Balancer with HTTPS (self-signed cert)
+- **ECS Fargate**: Containerized frontend (SvelteKit) and processor
 - **Cognito**: User authentication
 - **S3**: File storage (input/output buckets)
 - **Lambda**: Serverless processing triggers
 - **DynamoDB**: Job tracking and metadata
 - **VPC**: Network isolation
 
-See [docs/architecture.md](docs/architecture.md) for detailed diagrams.
+See [docs/architecture.md](docs/architecture.md) for detailed architecture documentation.
 
 ---
 
 ## Documentation
 
-### For Initial Setup
-📘 **[Deployment Guide](docs/deployment-guide.md)** - Complete step-by-step instructions
-- Prerequisites and requirements
-- Configuration options
-- Deployment process
-- Post-deployment setup
-- Troubleshooting common issues
-
-### For Understanding the System
-📊 **[Architecture Documentation](docs/architecture.md)** - System design and components
-- Architecture diagrams
-- Component specifications
-- Data flow
-- Security model
-- Cost breakdown
-- Scalability patterns
-
-### For Day-to-Day Operations
-🔧 **[Maintenance Guide](docs/maintenance-guide.md)** - Operations and maintenance
-- Daily operational tasks
-- Updating the application
-- Monitoring and logging
-- Backup and restore procedures
-- Scaling resources
-- Security maintenance
-- Cost management
-- Troubleshooting
-- Emergency procedures
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/architecture.md) | System design, components, data flow |
+| [Deployment Guide](docs/deployment-guide.md) | Step-by-step deployment instructions |
+| [Troubleshooting](docs/troubleshooting.md) | Common issues and solutions |
 
 ---
 
@@ -151,16 +128,10 @@ The `infra/terraform.tfvars` file controls all deployment settings. Key options:
 
 ### Required Settings
 ```hcl
-aws_region = "eu-west-1"              # AWS region
+aws_region = "eu-west-2"              # AWS region
 
 # IAM roles configuration
 use_existing_iam_roles = true         # Use existing IAM roles (recommended)
-
-# Cognito callback URLs (update after getting CloudFront URL)
-cognito_callback_urls = [
-  "http://localhost:5173/auth/callback",
-  "https://YOUR_CLOUDFRONT_URL/auth/callback"
-]
 ```
 
 ### IAM Roles (if using existing)
@@ -178,6 +149,14 @@ existing_iam_role_names = {
 }
 ```
 
+### Custom Domain (Optional)
+```hcl
+enable_custom_domain = true
+domain_name = "mine-maps.com"
+```
+
+This enables ACM SSL certificate and Route53 DNS. See [Deployment Guide](docs/deployment-guide.md#custom-domain-setup-optional) for setup instructions.
+
 See [infra/terraform.tfvars.example](infra/terraform.tfvars.example) for all available options.
 
 ---
@@ -185,9 +164,11 @@ See [infra/terraform.tfvars.example](infra/terraform.tfvars.example) for all ava
 ## Post-Deployment
 
 After deployment completes, you'll receive:
-- **CloudFront URL**: Your application endpoint (HTTPS)
+- **Application URL**: ALB endpoint with HTTPS (self-signed certificate)
 - **Cognito User Pool ID**: For creating users
 - **S3 Bucket Names**: For file storage
+
+> **Note**: Browser will show a certificate warning (self-signed cert). Click "Advanced" → "Proceed" to access the application.
 
 ### Create Your First User
 
@@ -212,7 +193,7 @@ aws cognito-idp admin-set-user-password \
 
 ### Access Your Application
 
-Visit the CloudFront URL and log in with your admin credentials.
+Visit the Application URL and log in with your admin credentials.
 
 ---
 
@@ -248,27 +229,19 @@ cd deployment-package
 # Follow prompts (requires "DELETE" and "YES I AM SURE")
 ```
 
-See [Maintenance Guide](docs/maintenance-guide.md) for detailed operational procedures.
 
 ---
 
 ## Troubleshooting
 
-### CloudFront shows "Something went wrong"
-**Solution:** Wait 2-3 minutes for cache to clear, or manually invalidate:
-```bash
-cd infra
-DIST_ID=$(terraform output -raw cloudfront_distribution_id)
-aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*"
-```
+### Certificate warning in browser
+**Expected behavior:** The ALB uses a self-signed certificate. Click "Advanced" → "Proceed" to continue.
 
 ### Login fails with "redirect_mismatch"
-**Solution:** Verify CloudFront URL is in Cognito callback URLs:
+**Solution:** Verify ALB URL is correctly configured in Cognito:
 ```bash
 cd infra
-terraform output cloudfront_url
-# Update terraform.tfvars if needed, then:
-terraform apply
+terraform output alb_url
 ```
 
 ### "AccessDenied" errors in application
@@ -279,17 +252,8 @@ aws ecs describe-task-definition \
   --query 'taskDefinition.taskRoleArn'
 ```
 
-### High AWS costs
-**Solution:** Check S3 storage and CloudFront data transfer:
-```bash
-aws ce get-cost-and-usage \
-  --time-period Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date +%Y-%m-%d) \
-  --granularity MONTHLY \
-  --metrics "UnblendedCost" \
-  --group-by Type=SERVICE
-```
+See [docs/troubleshooting.md](docs/troubleshooting.md) for more solutions.
 
-See [Deployment Guide](docs/deployment-guide.md) for comprehensive troubleshooting.
 
 ---
 
@@ -306,38 +270,30 @@ See [Deployment Guide](docs/deployment-guide.md) for comprehensive troubleshooti
 7. **Configure custom domain** with SSL/TLS certificate
 8. **Enable DynamoDB backups** (PITR) for production data
 
-See [Maintenance Guide - Security](docs/maintenance-guide.md#security-maintenance) for detailed security procedures.
 
 ---
 
 ## Cost Breakdown
 
-### Default Configuration (~$25-56/month)
+### Default Configuration (~$32-62/month)
 | Service | Monthly Cost | Notes |
 |---------|-------------|-------|
 | ECS Fargate (Frontend) | $15-25 | 24/7 running task |
-| CloudFront | $5-10 | Depends on traffic |
+| ALB | $16-22 | Load balancer + LCU |
 | DynamoDB | $2-10 | On-demand pricing |
 | S3 Storage | $1-5 | Depends on uploads |
 | Lambda | $0-5 | Usually in free tier |
 | ECR | $1 | Image storage |
 
 ### Cost Optimization
-- Use CloudFront caching aggressively (80%+ hit rate)
 - Set S3 lifecycle policies (delete old files)
 - Right-size ECS tasks (don't over-provision)
 - Use DynamoDB on-demand for variable load
 
-See [Architecture - Cost Breakdown](docs/architecture.md#cost-breakdown) for detailed analysis.
 
 ---
 
 ## Support
-
-### Documentation
-- **Deployment**: [docs/deployment-guide.md](docs/deployment-guide.md)
-- **Architecture**: [docs/architecture.md](docs/architecture.md)
-- **Maintenance**: [docs/maintenance-guide.md](docs/maintenance-guide.md)
 
 ### AWS Resources
 - **AWS CLI Reference**: https://docs.aws.amazon.com/cli/
@@ -404,7 +360,7 @@ This deployment package is provided for authorized use only. Unauthorized copyin
 | Authentication | Cognito | OAuth 2.0 |
 | Database | DynamoDB | On-demand |
 | Storage | S3 | Standard |
-| CDN | CloudFront | Latest |
+| Load Balancer | ALB | Latest |
 | Compute | ECS Fargate | Latest |
 
 ---
@@ -419,10 +375,9 @@ If you encounter issues:
 4. **Check AWS Service Health** dashboard
 5. **Review recent changes** (git log, Terraform state)
 
-For production issues, follow the [Emergency Procedures](docs/maintenance-guide.md#emergency-procedures) in the Maintenance Guide.
 
 ---
 
-**Package Version:** 1.0.0
-**Last Updated:** 2025-11-06
+**Package Version:** 1.0.1
+**Last Updated:** 2025-11-26
 **Tested With:** AWS CLI 2.x, Terraform 1.6.x, Node.js 20.x

@@ -1,8 +1,4 @@
-/**
- * ZIP file validation utility
- * Validates ZIP files contain valid images (.jpg or .tif) before upload
- * Also validates filename format, sheet numbers, and georeferencing files
- */
+// ZIP file validation - validates images and georeferencing files before upload
 
 import { parseMapFilename } from './filenameParser';
 
@@ -21,9 +17,6 @@ export type ValidationResult = {
 };
 
 
-/**
- * Check if a filename is a valid image file
- */
 function isValidImage(filename: string): { valid: boolean; type?: 'jpg' | 'tif' } {
 	const lower = filename.toLowerCase();
 
@@ -38,19 +31,12 @@ function isValidImage(filename: string): { valid: boolean; type?: 'jpg' | 'tif' 
 	return { valid: false };
 }
 
-/**
- * Check if a filename is a world file for georeferencing
- * Common extensions: .jgw, .jgwx, .tfw, .tifw, .tiffw, .pgw, .pngw
- */
 function isWorldFile(filename: string): boolean {
 	const lower = filename.toLowerCase();
 	const worldExtensions = ['.jgw', '.jgwx', '.tfw', '.tifw', '.tiffw', '.pgw', '.pngw'];
 	return worldExtensions.some(ext => lower.endsWith(ext));
 }
 
-/**
- * Get expected world file names for an image
- */
 function getExpectedWorldFiles(imageName: string): string[] {
 	const baseName = imageName.replace(/\.(jpg|jpeg|tif|tiff)$/i, '');
 	const lower = imageName.toLowerCase();
@@ -70,10 +56,6 @@ function getExpectedWorldFiles(imageName: string): string[] {
 	return [];
 }
 
-/**
- * Validate a single ZIP file
- * Returns validation result with error message if invalid
- */
 export async function validateZipFile(file: File): Promise<ValidationResult> {
 	const result: ValidationResult = {
 		valid: false,
@@ -201,24 +183,14 @@ export async function validateZipFile(file: File): Promise<ValidationResult> {
 	}
 }
 
-/**
- * Validate multiple ZIP files
- * Returns array of validation results
- */
 export async function validateZipFiles(files: File[]): Promise<ValidationResult[]> {
 	return Promise.all(files.map(file => validateZipFile(file)));
 }
 
-/**
- * Check if all validation results are valid
- */
 export function allValid(results: ValidationResult[]): boolean {
 	return results.every(r => r.valid);
 }
 
-/**
- * Get summary of validation results
- */
 export function getValidationSummary(results: ValidationResult[]): {
 	total: number;
 	valid: number;

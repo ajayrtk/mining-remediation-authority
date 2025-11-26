@@ -1,13 +1,4 @@
-/**
- * DynamoDB batch write utilities
- *
- * Optimizes write operations by:
- * - Batching multiple writes into BatchWriteItem calls (up to 25 items)
- * - Automatically handling unprocessed items with exponential backoff
- * - Reducing costs and improving throughput vs individual PutItem calls
- *
- * Note: BatchWriteItem is ~40% cheaper than individual PutItem calls
- */
+// DynamoDB batch write utilities
 
 import { BatchWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { dynamoDocClient } from './dynamo';
@@ -17,13 +8,6 @@ interface BatchWriteItem {
 	item: Record<string, any>;
 }
 
-/**
- * Batch write multiple items with automatic retry of unprocessed items
- *
- * @param items - Array of items to write
- * @param maxRetries - Maximum number of retry attempts for unprocessed items
- * @returns Array of successfully written items
- */
 export async function batchWriteItems(
 	items: BatchWriteItem[],
 	maxRetries = 3
@@ -123,13 +107,6 @@ export async function batchWriteItems(
 	return { successful, failed };
 }
 
-/**
- * Batch delete multiple items with automatic retry of unprocessed items
- *
- * @param items - Array of items to delete (tableName + key)
- * @param maxRetries - Maximum number of retry attempts for unprocessed items
- * @returns Count of successful and failed deletions
- */
 export async function batchDeleteItems(
 	items: Array<{ tableName: string; key: Record<string, any> }>,
 	maxRetries = 3
@@ -229,10 +206,6 @@ export async function batchDeleteItems(
 	return { successful, failed };
 }
 
-/**
- * Helper for batching map status updates
- * Common use case: updating status for multiple maps in a job
- */
 export async function batchUpdateMapStatus(
 	tableName: string,
 	updates: Array<{

@@ -1,12 +1,8 @@
-# Application Load Balancer - handles incoming HTTPS traffic and routes to ECS tasks
-
-# Security group for the ALB
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg-${var.environment}"
   description = "Security group for Application Load Balancer"
   vpc_id      = aws_vpc.main.id
 
-  # Allow HTTP from anywhere (will redirect to HTTPS)
   ingress {
     description = "HTTP from anywhere"
     from_port   = 80
@@ -15,7 +11,6 @@ resource "aws_security_group" "alb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Allow HTTPS from anywhere
   ingress {
     description = "HTTPS from anywhere"
     from_port   = 443
@@ -24,7 +19,6 @@ resource "aws_security_group" "alb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Allow all outbound traffic to ECS tasks
   egress {
     description = "All traffic to ECS tasks"
     from_port   = 0
@@ -41,7 +35,6 @@ resource "aws_security_group" "alb" {
   }
 }
 
-# Update ECS security group to allow traffic from ALB
 resource "aws_security_group_rule" "ecs_from_alb" {
   type                     = "ingress"
   from_port                = 3000
@@ -52,7 +45,6 @@ resource "aws_security_group_rule" "ecs_from_alb" {
   description              = "Allow traffic from ALB"
 }
 
-# Application Load Balancer
 resource "aws_lb" "frontend" {
   name               = "${var.project_name}-alb-${var.environment}"
   internal           = false
@@ -71,13 +63,12 @@ resource "aws_lb" "frontend" {
   }
 }
 
-# Target Group for ECS Tasks
 resource "aws_lb_target_group" "frontend" {
   name        = "${var.project_name}-tg-${var.environment}"
   port        = 3000
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
-  target_type = "ip" # Required for Fargate
+  target_type = "ip"
 
   health_check {
     enabled             = true
@@ -101,7 +92,6 @@ resource "aws_lb_target_group" "frontend" {
   }
 }
 
-# Self-signed certificate for HTTPS (used when custom domain is NOT enabled)
 resource "tls_private_key" "alb" {
   count = var.enable_custom_domain ? 0 : 1
 
@@ -146,8 +136,6 @@ resource "aws_acm_certificate" "alb_self_signed" {
   }
 }
 
-# ALB Listener - HTTPS on port 443 (primary)
-# Uses ACM certificate when custom domain is enabled, otherwise uses self-signed certificate
 resource "aws_lb_listener" "frontend_https" {
   load_balancer_arn = aws_lb.frontend.arn
   port              = "443"
@@ -168,7 +156,6 @@ resource "aws_lb_listener" "frontend_https" {
   }
 }
 
-# ALB Listener - HTTP on port 80 (redirects to HTTPS)
 resource "aws_lb_listener" "frontend_http" {
   load_balancer_arn = aws_lb.frontend.arn
   port              = "80"
@@ -192,7 +179,6 @@ resource "aws_lb_listener" "frontend_http" {
   }
 }
 
-# Outputs
 output "alb_dns_name" {
   description = "DNS name of the Application Load Balancer"
   value       = aws_lb.frontend.dns_name

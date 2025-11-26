@@ -1,16 +1,4 @@
-/**
- * Audit logging system for tracking critical operations
- *
- * Logs security-relevant events like:
- * - Authentication attempts
- * - File uploads/downloads/deletions
- * - Map retries
- * - Configuration changes
- * - API access patterns
- *
- * In production, these logs should be sent to a centralized logging system
- * like CloudWatch Logs, Datadog, or similar for analysis and alerting.
- */
+// Audit logging for security-relevant operations
 
 export enum AuditEventType {
 	// Authentication events
@@ -89,10 +77,6 @@ export interface AuditLogEntry {
 	errorMessage?: string;
 }
 
-/**
- * Log an audit event
- * In production, this should send to CloudWatch Logs or similar
- */
 export function logAuditEvent(entry: Omit<AuditLogEntry, 'timestamp'>): void {
 	const fullEntry: AuditLogEntry = {
 		...entry,
@@ -118,17 +102,9 @@ export function logAuditEvent(entry: Omit<AuditLogEntry, 'timestamp'>): void {
 			break;
 	}
 
-	// In production, also send to external logging service:
-	// await sendToCloudWatch(fullEntry);
-	// await sendToDatadog(fullEntry);
-	// await sendToElasticsearch(fullEntry);
 }
 
-/**
- * Helper functions for common audit events
- */
 export const AuditLog = {
-	/** Log successful upload */
 	uploadSuccess: (userId: string, resourceId: string, metadata?: Record<string, any>) =>
 		logAuditEvent({
 			eventType: AuditEventType.UPLOAD_SUCCESS,
@@ -141,7 +117,6 @@ export const AuditLog = {
 			metadata
 		}),
 
-	/** Log failed upload */
 	uploadFailure: (
 		userId: string,
 		errorMessage: string,
@@ -159,7 +134,6 @@ export const AuditLog = {
 			correlationId
 		}),
 
-	/** Log rejected upload (rate limit, validation, etc.) */
 	uploadRejected: (
 		userId: string,
 		reason: string,
@@ -177,7 +151,6 @@ export const AuditLog = {
 			correlationId
 		}),
 
-	/** Log rate limit exceeded */
 	rateLimitExceeded: (userId: string, endpoint: string, metadata?: Record<string, any>) =>
 		logAuditEvent({
 			eventType: AuditEventType.RATE_LIMIT_EXCEEDED,
@@ -188,7 +161,6 @@ export const AuditLog = {
 			metadata
 		}),
 
-	/** Log download */
 	downloadSuccess: (userId: string, resourceId: string, metadata?: Record<string, any>) =>
 		logAuditEvent({
 			eventType: AuditEventType.DOWNLOAD_SUCCESS,
@@ -201,7 +173,6 @@ export const AuditLog = {
 			metadata
 		}),
 
-	/** Log deletion */
 	deleteSuccess: (userId: string, resourceId: string, metadata?: Record<string, any>) =>
 		logAuditEvent({
 			eventType: AuditEventType.DELETE_SUCCESS,
@@ -214,7 +185,6 @@ export const AuditLog = {
 			metadata
 		}),
 
-	/** Log retry */
 	retryInitiated: (userId: string, resourceId: string, metadata?: Record<string, any>) =>
 		logAuditEvent({
 			eventType: AuditEventType.RETRY_INITIATED,
@@ -227,7 +197,6 @@ export const AuditLog = {
 			metadata
 		}),
 
-	/** Log unauthorized access attempt */
 	unauthorizedAccess: (
 		userId: string | undefined,
 		action: string,
@@ -244,7 +213,6 @@ export const AuditLog = {
 			metadata
 		}),
 
-	/** Log forbidden access (authenticated but not authorized) */
 	forbiddenAccess: (
 		userId: string,
 		resourceId: string,
@@ -261,7 +229,6 @@ export const AuditLog = {
 			metadata
 		}),
 
-	/** Log service error */
 	serviceError: (
 		serviceName: string,
 		errorMessage: string,
@@ -278,6 +245,5 @@ export const AuditLog = {
 			metadata
 		}),
 
-	/** Log custom audit event */
 	customEvent: (entry: Omit<AuditLogEntry, 'timestamp'>) => logAuditEvent(entry)
 };

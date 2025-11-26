@@ -1,11 +1,4 @@
-# Lambda Input Handler
-# This Lambda is triggered when a file is uploaded to the S3 input bucket
-# Main responsibilities:
-# 1. Extract metadata from the uploaded file (jobId, mapId, submittedBy, etc.)
-# 2. Create or update job tracking records in DynamoDB
-# 3. Create map entry for the uploaded file
-# 4. Launch ECS Fargate task to process the file
-# 5. Handle failures and retry scenarios
+# Lambda triggered by S3 upload - creates DynamoDB records and launches ECS task
 
 import json
 import logging
@@ -41,26 +34,7 @@ def iso_timestamp() -> str:
 
 
 def validate_filename(filename: str) -> tuple[bool, str, str, str]:
-    """
-    Validate map filename format - Lambda-level enforcement (backend validation)
-    Catches files that bypass frontend validation (e.g., direct S3 uploads, API calls)
-
-    IMPORTANT: This validation logic is intentionally duplicated from the frontend
-    (frontend/src/lib/utils/filenameParser.ts:parseMapFilename) for defense-in-depth security.
-    Frontend validation provides immediate user feedback, while this Lambda validation
-    provides security enforcement and catches files uploaded outside the normal flow.
-
-    When modifying validation rules, update BOTH locations to maintain consistency.
-
-    Format: SeamID_SheetNumber[_optional_suffix].zip
-    - SeamID: MANDATORY, non-empty alphanumeric (everything before sheet number pattern)
-    - Underscore: MANDATORY separator
-    - SheetNumber: MANDATORY, exactly 6 digits in format XXXXXX or XX_XXXX
-
-    The parser finds the 6-digit sheet number pattern first, then treats everything before it as the seam ID.
-
-    Returns: (is_valid, seam_id, sheet_number, error_message)
-    """
+    """Validate map filename format: SeamID_SheetNumber.zip (mirrors frontend validation)"""
     import re
 
     # Remove file extension
@@ -114,16 +88,7 @@ def validate_filename(filename: str) -> tuple[bool, str, str, str]:
 
 
 def get_s3_metadata(bucket: str, key: str) -> dict:
-    """
-    Retrieve metadata from the uploaded S3 object.
-    The frontend sets metadata when generating presigned URLs (jobId, mapId, submittedBy, etc.)
-    This metadata tells us how to process the file and track it in DynamoDB.
-
-    Returns: dict of metadata if object exists
-    Raises:
-        - ClientError with 404 if object doesn't exist
-        - ClientError for other S3 errors (permission denied, etc.)
-    """
+    """Retrieve metadata from the uploaded S3 object."""
     try:
         response = s3_client.head_object(Bucket=bucket, Key=key)
         metadata = response.get("Metadata", {})
@@ -160,10 +125,7 @@ def get_s3_metadata(bucket: str, key: str) -> dict:
 
 
 def create_map_entry(map_id: str, map_name: str, owner_email: str, size_bytes: int, timestamp: str, job_id: str) -> None:
-    """
-    Create a MAP entry in the MAPS table linked to a job
-    This tracks individual file processing - each uploaded file gets its own map entry
-    """
+    """Create a MAP entry in the MAPS table linked to a job."""
     if not MAPS_TABLE_NAME:
         logging.warning("MAPS_TABLE_NAME not configured, skipping MAP creation")
         return
@@ -225,11 +187,7 @@ def create_map_entry(map_id: str, map_name: str, owner_email: str, size_bytes: i
 
 
 def create_or_get_job(job_id: str, submitted_by: str, timestamp: str, batch_size: int) -> bool:
-    """
-    Create job entry if it doesn't exist
-    Jobs track batches of uploaded files - multiple maps can belong to one job
-    Returns True if created, False if already exists
-    """
+    """Create job entry if it doesn't exist. Returns True if created."""
     if not TABLE_NAME:
         return False
 
@@ -268,7 +226,7 @@ def create_or_get_job(job_id: str, submitted_by: str, timestamp: str, batch_size
 
 
 def mark_failed(job_id: str, reason: str) -> None:
-    """Mark a job as FAILED in DynamoDB - used when Lambda itself fails"""
+    """Mark a job as FAILED in DynamoDB."""
     if not (TABLE_NAME and job_id):
         return
 
@@ -287,13 +245,7 @@ def mark_failed(job_id: str, reason: str) -> None:
 
 
 def launch_ecs_task(job_id: str, map_id: str, map_name: str, bucket: str, key: str) -> tuple[bool, str | None]:
-    """
-    Launch ECS Fargate task to process the file
-    This is the main processing path - each file gets its own ECS task
-    The task will copy the file from input bucket to output bucket and update DynamoDB
-
-    Returns: (success: bool, task_arn: str | None)
-    """
+    """Launch ECS Fargate task to process the file."""
     # Make sure we have all the ECS config we need
     if not all([ECS_CLUSTER, ECS_TASK_DEFINITION, ECS_SUBNETS, ECS_SECURITY_GROUP]):
         logging.warning("ECS configuration incomplete, skipping ECS task launch")
@@ -352,12 +304,7 @@ def launch_ecs_task(job_id: str, map_id: str, map_name: str, bucket: str, key: s
 
 
 def validate_s3_input_event(event: dict) -> bool:
-    """
-    Validate S3 input event structure.
-
-    Returns: True if valid
-    Raises: ValueError if validation fails
-    """
+    """Validate S3 input event structure."""
     if not isinstance(event, dict):
         raise ValueError(f"Event must be a dict, got {type(event).__name__}")
 
@@ -374,12 +321,7 @@ def validate_s3_input_event(event: dict) -> bool:
 
 
 def validate_s3_input_record(record: dict) -> tuple[str, str, int]:
-    """
-    Validate and extract S3 bucket, key, and size from event record.
-
-    Returns: (bucket, key, size_bytes)
-    Raises: ValueError if validation fails
-    """
+    """Validate and extract S3 bucket, key, and size from event record."""
     if not isinstance(record, dict):
         raise ValueError(f"Record must be a dict, got {type(record).__name__}")
 
@@ -420,14 +362,7 @@ def validate_s3_input_record(record: dict) -> tuple[str, str, int]:
 
 
 def lambda_handler(event, _context):
-    """
-    Main Lambda handler - triggered by S3 upload events
-    For each uploaded file:
-    1. Extract metadata and file info
-    2. Create/update job and map records in DynamoDB
-    3. Launch ECS task to process the file
-    4. Handle failures gracefully
-    """
+    """Main Lambda handler - triggered by S3 upload events."""
     # Basic config check - we need these to function
     if not TABLE_NAME or not S3_COPY_FUNCTION:
         raise RuntimeError("Missing JOBS_TABLE_NAME or S3_COPY_FUNCTION_NAME environment variables")

@@ -1,0 +1,90 @@
+# Dependencies
+node_modules/
+
+# Documentation & Scripts (internal use only)
+docs/
+scripts/
+
+# Build outputs
+build/
+dist/
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# Frontend (SvelteKit)
+.svelte-kit/
+.vite/
+
+# Terraform
+infra/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+*.tfvars.json
+terraform.tfplan
+tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.*.local
+
+# AWS credentials & secrets
+*.pem
+*.key
+credentials
+
+# OS files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
+.pytest_cache/
+.nyc_output/
+.jest/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Backup files
+*.bak
+*.backup
+*.orig
+*.old
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/

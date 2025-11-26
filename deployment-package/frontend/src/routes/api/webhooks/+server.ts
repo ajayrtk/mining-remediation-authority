@@ -1,10 +1,3 @@
-/**
- * Webhook management API
- *
- * Endpoints for users to register and manage webhook configurations.
- * Allows users to subscribe to events like map completion notifications.
- */
-
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { QueryCommand, PutCommand, DeleteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
@@ -13,9 +6,6 @@ import { checkRateLimit, RateLimitPresets } from '$lib/server/rate-limit';
 import { AuditLog } from '$lib/server/audit-log';
 import { WebhookEventType, type WebhookConfig } from '$lib/server/webhook';
 
-/**
- * GET - List all webhooks for the current user
- */
 export const GET: RequestHandler = async ({ locals }) => {
 	if (!locals.user) {
 		return json({ error: 'Please sign in to manage webhooks' }, { status: 401 });
@@ -46,9 +36,6 @@ export const GET: RequestHandler = async ({ locals }) => {
 	}
 };
 
-/**
- * POST - Create a new webhook
- */
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) {
 		return json({ error: 'Please sign in to create webhooks' }, { status: 401 });
@@ -136,9 +123,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 };
 
-/**
- * PATCH - Update an existing webhook
- */
 export const PATCH: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) {
 		return json({ error: 'Please sign in to update webhooks' }, { status: 401 });
@@ -246,9 +230,6 @@ export const PATCH: RequestHandler = async ({ request, locals }) => {
 	}
 };
 
-/**
- * DELETE - Delete a webhook
- */
 export const DELETE: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) {
 		return json({ error: 'Please sign in to delete webhooks' }, { status: 401 });

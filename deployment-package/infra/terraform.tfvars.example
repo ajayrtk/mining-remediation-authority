@@ -1,63 +1,38 @@
-# Example Terraform Variables Configuration
-# Copy this file to terraform.tfvars and modify as needed
+# Main configuration file for MRA Mines deployment
+# Copy this file to terraform.tfvars and update the values
 
-# ===== Basic Configuration =====
-aws_region   = "eu-west-2"
+# Basic settings - change these for different environments
 project_name = "mra-mines"
-environment  = "dev"
+environment  = "staging"       # dev, staging, or prod
+aws_region   = "eu-west-2"
 
-# ===== S3 Bucket Names =====
+# S3 bucket names - must be globally unique
 map_input_bucket_name  = "map-input"
 map_output_bucket_name = "map-output"
 
-# ===== DynamoDB Table Names =====
-maps_table_name     = "maps"
-map_jobs_table_name = "maps-job"
-
-# ===== SES Configuration =====
-ses_sender_email = "no-reply@example.com"
-
-# ===== Cognito Configuration =====
-# cognito_domain_prefix = "my-custom-prefix"  # Optional custom prefix
-
-cognito_callback_urls = [
-  "http://localhost:5173/auth/callback",
-  "https://your-domain.com/auth/callback"
-]
-
-cognito_logout_urls = [
-  "http://localhost:5173/",
-  "https://your-domain.com/"
-]
-
-# ===== IAM Role Configuration =====
-# Set to true to use existing IAM roles instead of creating new ones
+# IAM role configuration
+# Set to true if roles already exist in AWS (avoids conflicts)
 use_existing_iam_roles = false
 
-# When use_existing_iam_roles = true, specify the names of existing roles
-# Leave as null or omit roles you want to create
+# Only used when use_existing_iam_roles = true
 existing_iam_role_names = {
-  input_handler           = null  # "existing-input-handler-role"
-  output_handler         = null  # "existing-output-handler-role"
-  s3_copy_processor      = null  # "existing-s3-copy-processor-role"
-  ecs_task_execution     = null  # "existing-ecs-task-execution-role"
-  ecs_task               = null  # "existing-ecs-task-role"
-  frontend_task_execution = null  # "existing-frontend-task-execution-role"
-  frontend_task          = null  # "existing-frontend-task-role"
-  pre_auth_trigger       = null  # "existing-pre-auth-trigger-role"
+  input_handler           = "mra-mines-input-handler"
+  output_handler         = "mra-mines-output-handler"
+  s3_copy_processor      = "mra-mines-s3-copy-processor"
+  ecs_task_execution     = "mra-mines-ecs-task-execution"
+  ecs_task               = "mra-mines-ecs-task"
+  frontend_task_execution = "mra-mines-dev-frontend-task-execution"
+  frontend_task          = "mra-mines-dev-frontend-task"
+  pre_auth_trigger       = "mra-mines-pre-auth-trigger-role"
 }
 
-# ===== Example: Using Existing IAM Roles =====
-# Uncomment and modify the following to use existing IAM roles:
+# Default admin user - CHANGE PASSWORD after first login!
+admin_email    = "admin@example.com"
+admin_username = "admin"
+admin_password = "CHANGE_ME_SECURE_PASSWORD"
 
-# use_existing_iam_roles = true
-# existing_iam_role_names = {
-#   input_handler           = "mra-mines-input-handler"
-#   output_handler         = "mra-mines-output-handler"
-#   s3_copy_processor      = "mra-mines-s3-copy-processor"
-#   ecs_task_execution     = "mra-mines-ecs-task-execution"
-#   ecs_task               = "mra-mines-ecs-task"
-#   frontend_task_execution = "mra-mines-dev-frontend-task-execution"
-#   frontend_task          = "mra-mines-dev-frontend-task"
-#   pre_auth_trigger       = "mra-mines-pre-auth-trigger-role"
-# }
+# Custom domain configuration
+# Set enable_custom_domain = true to use Route 53 and ACM for custom domain
+# Important: You must own the domain and update name servers after deployment
+domain_name          = "example.com"
+enable_custom_domain = false

@@ -56,12 +56,7 @@ def finalize_job(job_id: str, status: str, extra: dict | None = None) -> None:
 
 
 def validate_s3_event(event: dict) -> bool:
-    """
-    Validate S3 event structure.
-
-    Returns: True if valid
-    Raises: ValueError if validation fails
-    """
+    """Validate S3 event structure."""
     if not isinstance(event, dict):
         raise ValueError(f"Event must be a dict, got {type(event).__name__}")
 
@@ -75,12 +70,7 @@ def validate_s3_event(event: dict) -> bool:
 
 
 def validate_s3_record(record: dict) -> tuple[str, str]:
-    """
-    Validate and extract S3 bucket and key from event record.
-
-    Returns: (bucket, key)
-    Raises: ValueError if validation fails
-    """
+    """Validate and extract S3 bucket and key from event record."""
     if not isinstance(record, dict):
         raise ValueError(f"Record must be a dict, got {type(record).__name__}")
 

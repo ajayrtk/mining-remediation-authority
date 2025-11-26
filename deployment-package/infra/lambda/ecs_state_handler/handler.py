@@ -1,9 +1,4 @@
-# Lambda ECS State Handler
-# This Lambda is triggered by EventBridge when ECS task state changes
-# Main responsibilities:
-# 1. Capture taskStartedAt timestamp when ECS task transitions to RUNNING
-# 2. Update map record in DynamoDB with timing metrics
-# 3. Capture taskStoppedAt when task completes or fails
+# Lambda triggered by EventBridge ECS task state changes - captures timing metrics
 
 import json
 import logging
@@ -27,17 +22,11 @@ ECS_CLUSTER = os.getenv("ECS_CLUSTER")
 
 
 def iso_timestamp() -> str:
-    """Generate ISO 8601 timestamp for DynamoDB"""
     return datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
 
 
 def extract_map_info_from_task(task_arn: str, cluster: str) -> tuple[str | None, str | None]:
-    """
-    Extract mapId and mapName from ECS task environment variables.
-    The input_handler Lambda passes these when launching the task.
-
-    Returns: (map_id, map_name) or (None, None) if not found
-    """
+    """Extract mapId and mapName from ECS task environment variables."""
     try:
         response = ecs_client.describe_tasks(
             cluster=cluster,
@@ -79,18 +68,7 @@ def extract_map_info_from_task(task_arn: str, cluster: str) -> tuple[str | None,
 
 
 def update_map_timing(map_id: str, map_name: str, field_name: str, timestamp: str, task_arn: str = None) -> bool:
-    """
-    Update map record with timing metric.
-
-    Args:
-        map_id: Map ID (hash key)
-        map_name: Map name (sort key)
-        field_name: Name of the timestamp field to set (e.g., 'taskStartedAt', 'taskStoppedAt')
-        timestamp: ISO 8601 timestamp value
-        task_arn: Optional task ARN to store
-
-    Returns: True if successful
-    """
+    """Update map record with timing metric."""
     if not MAPS_TABLE_NAME:
         logger.warning("MAPS_TABLE_NAME not configured")
         return False
@@ -129,16 +107,7 @@ def update_map_timing(map_id: str, map_name: str, field_name: str, timestamp: st
 
 
 def lambda_handler(event, _context):
-    """
-    Main Lambda handler - triggered by EventBridge ECS task state changes.
-
-    EventBridge sends events for:
-    - PROVISIONING -> PENDING -> RUNNING -> STOPPED
-
-    We capture:
-    - taskStartedAt: When task transitions to RUNNING
-    - taskStoppedAt: When task transitions to STOPPED
-    """
+    """Main Lambda handler - triggered by EventBridge ECS task state changes."""
     logger.info(f"Received ECS state change event: {json.dumps(event)}")
 
     # Validate event structure

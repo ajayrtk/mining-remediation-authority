@@ -1,29 +1,13 @@
 import { randomBytes } from 'crypto';
 import type { SessionCookie } from './cognito';
 
-/**
- * WARNING: In-memory session store - NOT PRODUCTION READY
- *
- * LIMITATIONS:
- * - Sessions lost on server restart/redeploy
- * - Cannot scale horizontally (each instance has separate storage)
- * - No session persistence across deployments
- *
- * For production, implement persistent session storage using:
- * - Redis (recommended for performance)
- * - DynamoDB (for AWS-native solution)
- * - Database with TTL support
- */
+// In-memory session store - use Redis/DynamoDB for production
 const sessions = new Map<string, SessionCookie>();
 
 // Track last cleanup time to avoid frequent cleanups
 let lastCleanup = Date.now();
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
-/**
- * Lazy cleanup of expired sessions (called on each session access)
- * More efficient than setInterval in serverless environments
- */
 function cleanupExpiredSessions(): void {
 	const now = Date.now();
 

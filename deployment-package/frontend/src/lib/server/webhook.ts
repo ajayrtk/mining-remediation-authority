@@ -1,20 +1,4 @@
-/**
- * Webhook notification system
- *
- * Allows external services to be notified when map processing completes.
- * Supports webhook registration, delivery, and retry logic.
- *
- * Use cases:
- * - Notify external systems when processing completes
- * - Trigger downstream workflows
- * - Integration with Slack, Teams, or custom endpoints
- *
- * Features:
- * - Automatic retry with exponential backoff
- * - Webhook signature verification (HMAC-SHA256)
- * - Delivery attempt logging
- * - Circuit breaker integration
- */
+// Webhook notification system with retry and signature verification
 
 import { env } from '$env/dynamic/private';
 import { createHmac } from 'crypto';
@@ -24,71 +8,42 @@ const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_BACKOFF_MS = [1000, 5000, 15000]; // Exponential backoff
 
 export enum WebhookEventType {
-	/** Map processing completed successfully */
 	MAP_COMPLETED = 'map.completed',
-	/** Map processing failed */
 	MAP_FAILED = 'map.failed',
-	/** Batch of maps completed */
 	BATCH_COMPLETED = 'batch.completed',
-	/** Map deleted */
 	MAP_DELETED = 'map.deleted'
 }
 
 export interface WebhookPayload {
-	/** Event type */
 	event: WebhookEventType;
-	/** Event timestamp (ISO 8601) */
 	timestamp: string;
-	/** Correlation ID for request tracing */
 	correlationId?: string;
-	/** Event-specific data */
 	data: {
-		/** Map ID */
 		mapId?: string;
-		/** Map name */
 		mapName?: string;
-		/** Job ID (for batch operations) */
 		jobId?: string;
-		/** Processing status */
 		status?: string;
-		/** Error message (if failed) */
 		error?: string;
-		/** S3 output location (if completed) */
 		outputUrl?: string;
-		/** User who triggered the event */
 		userId?: string;
-		/** Additional metadata */
 		metadata?: Record<string, any>;
 	};
 }
 
 export interface WebhookDeliveryResult {
-	/** Whether delivery was successful */
 	success: boolean;
-	/** HTTP status code from webhook endpoint */
 	statusCode?: number;
-	/** Number of attempts made */
 	attempts: number;
-	/** Error message if delivery failed */
 	error?: string;
-	/** Response body from webhook endpoint */
 	responseBody?: string;
 }
 
-/**
- * Generate HMAC signature for webhook payload
- * This allows webhook receivers to verify the webhook is authentic
- */
 export function generateWebhookSignature(payload: string, secret: string = WEBHOOK_SECRET): string {
 	const hmac = createHmac('sha256', secret);
 	hmac.update(payload);
 	return hmac.digest('hex');
 }
 
-/**
- * Verify webhook signature
- * Webhook receivers should use this to validate incoming webhooks
- */
 export function verifyWebhookSignature(
 	payload: string,
 	signature: string,
@@ -99,9 +54,6 @@ export function verifyWebhookSignature(
 	return timingSafeEqual(signature, expectedSignature);
 }
 
-/**
- * Timing-safe string comparison to prevent timing attacks
- */
 function timingSafeEqual(a: string, b: string): boolean {
 	if (a.length !== b.length) return false;
 
@@ -112,9 +64,6 @@ function timingSafeEqual(a: string, b: string): boolean {
 	return result === 0;
 }
 
-/**
- * Deliver webhook to endpoint with retry logic
- */
 export async function deliverWebhook(
 	url: string,
 	payload: WebhookPayload,
@@ -215,9 +164,6 @@ export async function deliverWebhook(
 	};
 }
 
-/**
- * Send map completed webhook
- */
 export async function sendMapCompletedWebhook(
 	webhookUrl: string,
 	data: {
@@ -246,9 +192,6 @@ export async function sendMapCompletedWebhook(
 	return deliverWebhook(webhookUrl, payload);
 }
 
-/**
- * Send map failed webhook
- */
 export async function sendMapFailedWebhook(
 	webhookUrl: string,
 	data: {
@@ -277,9 +220,6 @@ export async function sendMapFailedWebhook(
 	return deliverWebhook(webhookUrl, payload);
 }
 
-/**
- * Send batch completed webhook
- */
 export async function sendBatchCompletedWebhook(
 	webhookUrl: string,
 	data: {
@@ -311,9 +251,6 @@ export async function sendBatchCompletedWebhook(
 	return deliverWebhook(webhookUrl, payload);
 }
 
-/**
- * Send map deleted webhook
- */
 export async function sendMapDeletedWebhook(
 	webhookUrl: string,
 	data: {
@@ -339,10 +276,6 @@ export async function sendMapDeletedWebhook(
 	return deliverWebhook(webhookUrl, payload);
 }
 
-/**
- * Helper to send webhook notifications for map status changes
- * This can be called from ECS task completion handlers
- */
 export async function notifyMapStatusChange(
 	webhookUrls: string[],
 	mapId: string,
@@ -398,28 +331,15 @@ export async function notifyMapStatusChange(
 	});
 }
 
-/**
- * Webhook configuration stored in DynamoDB
- * This allows users to register their webhook endpoints
- */
 export interface WebhookConfig {
-	/** Unique webhook ID */
 	webhookId: string;
-	/** User who owns this webhook */
 	userId: string;
-	/** Webhook endpoint URL */
 	url: string;
-	/** Events to subscribe to */
 	events: WebhookEventType[];
-	/** Whether webhook is active */
 	enabled: boolean;
-	/** Custom headers to send with webhook */
 	headers?: Record<string, string>;
-	/** Webhook secret for signature verification (optional, overrides global secret) */
 	secret?: string;
-	/** Created timestamp */
 	createdAt: string;
-	/** Last updated timestamp */
 	updatedAt: string;
 }
 

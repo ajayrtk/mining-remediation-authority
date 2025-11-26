@@ -1,16 +1,5 @@
-/**
- * Shared filename parser - Frontend validation for map filenames
- * Used by: zipValidator, presigned-url, validate-map API
- *
- * This ensures consistent parsing across all frontend validation layers.
- *
- * IMPORTANT: This validation logic is intentionally duplicated in the Lambda backend
- * (infra/lambda/input_handler/handler.py:validate_filename) for defense-in-depth security.
- * Frontend validation provides immediate user feedback, while Lambda validation catches
- * files that bypass the frontend (e.g., direct S3 uploads, API calls).
- *
- * When modifying validation rules, update BOTH locations to maintain consistency.
- */
+// Filename parser for map files (SeamID_SheetNumber.zip format)
+// Note: Validation logic duplicated in Lambda backend for defense-in-depth
 
 export interface ParsedFilename {
 	seamId: string;
@@ -19,28 +8,9 @@ export interface ParsedFilename {
 	error?: string;
 }
 
-/**
- * Parse map filename to extract SeamID and SheetNumber
- *
- * Format: SeamID_SheetNumber[_optional_suffix].zip
- * - SeamID: MANDATORY, non-empty alphanumeric (everything before sheet number pattern)
- * - Underscore: MANDATORY separator
- * - SheetNumber: MANDATORY, exactly 6 digits in format XXXXXX or XX_XXXX
- *
- * The parser finds the 6-digit sheet number pattern first, then treats everything before it as the seam ID.
- *
- * Valid examples:
- * - 16516_433857.zip → {seamId: "16516", sheetNumber: "433857"}
- * - D723_43_3857.zip → {seamId: "D723", sheetNumber: "433857"}
- * - 43_433857.zip → {seamId: "43", sheetNumber: "433857"}
- * - 43_43_3857.zip → {seamId: "43", sheetNumber: "433857"}
- * - 17836_26_9285_UpperHirst.zip → {seamId: "17836", sheetNumber: "269285"}
- *
- * Invalid examples:
- * - _453858.zip (no seam ID before sheet number)
- * - 453858.zip (no underscore separator)
- * - 16516_4538.zip (only 4 digits in sheet number)
- */
+// Extracts SeamID and SheetNumber from filename
+// Format: SeamID_SheetNumber[_optional_suffix].zip
+// Examples: 16516_433857.zip, D723_43_3857.zip
 export function parseMapFilename(filename: string): ParsedFilename {
 	// Remove file extension
 	const nameWithoutExt = filename.replace(/\.(zip|jpg|jpeg|tif|tiff)$/i, '');
@@ -138,13 +108,6 @@ export function parseMapFilename(filename: string): ParsedFilename {
 	};
 }
 
-/**
- * Sanitize filename to standard format: SeamID_SheetNumber.zip
- * Used for S3 key generation to ensure consistency
- *
- * @param filename Original filename to sanitize
- * @returns Sanitized filename or null if invalid
- */
 export function sanitizeMapFilename(filename: string): string | null {
 	const parsed = parseMapFilename(filename);
 

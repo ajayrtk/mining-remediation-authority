@@ -730,13 +730,13 @@
 										{/if}
 									</span>
 								</th>
-								<th class="sortable align-center" on:click={() => handleSort('outputSizeBytes')} style="text-align: center;">
+								<th class="sortable" on:click={() => handleSort('outputSizeBytes')} style="text-align: right;">
 										Size
 										{#if sortColumn === 'outputSizeBytes'}
 											<span class="sort-arrow">{sortDirection === 'asc' ? '↑' : '↓'}</span>
 										{/if}
 								</th>
-								<th class="sortable align-center" on:click={() => handleSort('createdAt')} style="text-align: center;">
+								<th class="sortable" on:click={() => handleSort('createdAt')} style="text-align: right;">
 										Created
 										{#if sortColumn === 'createdAt'}
 											<span class="sort-arrow">{sortDirection === 'asc' ? '↑' : '↓'}</span>

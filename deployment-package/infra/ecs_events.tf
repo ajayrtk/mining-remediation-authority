@@ -1,14 +1,9 @@
-# ECS State Handler Lambda and EventBridge Rule
-# Captures ECS task lifecycle events to track timing metrics for map processing
-
-# Archive the Lambda function code
 data "archive_file" "ecs_state_handler" {
 	type        = "zip"
 	source_dir  = "${path.module}/lambda/ecs_state_handler"
 	output_path = "${path.module}/build/ecs_state_handler.zip"
 }
 
-# ECS State Handler Lambda function
 resource "aws_lambda_function" "ecs_state_handler" {
 	function_name    = "${var.project_name}-ecs-state-handler-${var.environment}"
 	runtime          = "python3.11"
@@ -28,7 +23,6 @@ resource "aws_lambda_function" "ecs_state_handler" {
 	tags = local.tags
 }
 
-# IAM Role for ECS State Handler Lambda
 resource "aws_iam_role" "ecs_state_handler" {
 	count              = var.use_existing_iam_roles ? 0 : 1
 	name               = "${var.project_name}-ecs-state-handler-${var.environment}"
@@ -36,7 +30,6 @@ resource "aws_iam_role" "ecs_state_handler" {
 	tags               = local.tags
 }
 
-# IAM Policy for ECS State Handler Lambda
 resource "aws_iam_role_policy" "ecs_state_handler" {
 	count = var.use_existing_iam_roles ? 0 : 1
 	name  = "${var.project_name}-ecs-state-handler-${var.environment}"
@@ -73,14 +66,12 @@ resource "aws_iam_role_policy" "ecs_state_handler" {
 	})
 }
 
-# Attach basic execution role for CloudWatch Logs
 resource "aws_iam_role_policy_attachment" "ecs_state_handler_basic" {
 	count      = var.use_existing_iam_roles ? 0 : 1
 	role       = aws_iam_role.ecs_state_handler[0].name
 	policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# EventBridge Rule to capture ECS task state changes
 resource "aws_cloudwatch_event_rule" "ecs_task_state_change" {
 	name        = "${var.project_name}-ecs-task-state-${var.environment}"
 	description = "Captures ECS task state changes for timing metrics"
@@ -97,14 +88,12 @@ resource "aws_cloudwatch_event_rule" "ecs_task_state_change" {
 	tags = local.tags
 }
 
-# EventBridge Target to invoke the Lambda
 resource "aws_cloudwatch_event_target" "ecs_state_to_lambda" {
 	rule      = aws_cloudwatch_event_rule.ecs_task_state_change.name
 	target_id = "EcsStateHandler"
 	arn       = aws_lambda_function.ecs_state_handler.arn
 }
 
-# Permission for EventBridge to invoke Lambda
 resource "aws_lambda_permission" "allow_eventbridge" {
 	statement_id  = "AllowExecutionFromEventBridge"
 	action        = "lambda:InvokeFunction"

@@ -1,319 +1,236 @@
-# Deployment Troubleshooting Guide
+# Troubleshooting
 
-## Quick Reference
+## Common Issues
 
-This document provides solutions to common deployment issues encountered with the MRA Mines Map infrastructure.
+### Certificate Warning in Browser
 
-## Issues Resolved in This Session
+**Symptom**: Browser shows security warning when accessing application.
 
-### ✅ Issue 1: IAM Role Already Exists
-**Error Message:**
-```
-Error: creating IAM Role (mra-mines-ecs-task-execution): operation error IAM: CreateRole,
-https response error StatusCode: 409, RequestID: ..., EntityAlreadyExists:
-Role with name mra-mines-ecs-task-execution already exists.
-```
+**Cause**: ALB uses self-signed certificate.
 
-**Root Cause:**
-- IAM roles already exist in AWS account from previous deployment
-- Terraform trying to create them again
-- No mechanism to use existing roles
+**Solution**: Click "Advanced" and "Proceed" to continue. This is expected for internal use.
 
-**Solution:**
-1. Set `use_existing_iam_roles = true` in `terraform.tfvars`
-2. Specify existing role names in `existing_iam_role_names` variable
-3. Terraform will use data sources instead of creating new roles
+---
 
-**Files Modified:**
-- `variables.tf` - Added new variables
-- `iam_data.tf` - Created data sources for existing roles
-- `iam.tf`, `ecs.tf`, `frontend_ecs_simple.tf`, `lambda_pre_auth.tf` - Made roles conditional
-- `terraform.tfvars` - Configured to use existing roles
+### Login Fails with "redirect_mismatch"
 
-**Verification:**
+**Symptom**: Cognito returns redirect_mismatch error after login.
+
+**Cause**: Callback URL doesn't match ALB DNS.
+
+**Solution**:
 ```bash
 cd infra
-terraform plan | grep "data.aws_iam_role.existing"
-# Should show data sources being read, not resources being created
+terraform output alb_dns_name
+# Verify this matches Cognito callback URL
+terraform output application_url
 ```
+
+If mismatch, run `terraform apply` to sync.
 
 ---
 
-### ✅ Issue 2: Build Script Not Found
-**Error Message:**
-```
-./build_and_push.sh: No such file or directory
-ERROR: Frontend deployment failed when executing deploy.sh script
-```
+### ECS Task Not Starting
 
-**Root Cause:**
-- `deploy.sh` changed directory to `infra` too early
-- When it tried to run `./build_and_push.sh`, it looked in wrong directory
-- `build_and_push.sh` is in `frontend` directory, not `infra`
+**Symptom**: Service shows 0 running tasks.
 
-**Solution:**
-Changed directory navigation flow in `deploy.sh`:
+**Diagnosis**:
 ```bash
-# Before (incorrect):
-cd frontend
-npm ci && npm run build
-cd ../infra
-./build_and_push.sh  # ❌ Script not in infra directory
+cd infra
+CLUSTER=$(terraform output -raw ecs_cluster_name)
+SERVICE=$(terraform output -raw frontend_service_name)
+REGION=$(terraform output -raw aws_region)
 
-# After (correct):
-cd frontend
-npm ci && npm run build
-./build_and_push.sh  # ✅ Script is in frontend directory
-cd ../infra
-```
-
-**Files Modified:**
-- `../scripts/deploy.sh` (lines 104-118)
-
----
-
-### ✅ Issue 3: ECR Authentication Failed
-**Error Message:**
-```
-no basic auth credentials
-ERROR: Frontend deployment failed when executing deploy.sh script
-```
-
-**Root Cause:**
-- Docker not authenticated with ECR
-- Wrong AWS region used for authentication (eu-west-2 vs eu-west-1)
-- Resources actually in eu-west-1, script defaulted to eu-west-2
-
-**Solution:**
-1. Enhanced region detection in `build_and_push.sh`:
-   - Try terraform output first
-   - Fall back to reading `terraform.tfvars`
-   - Changed default from eu-west-2 to eu-west-1
-
-2. Manual authentication (immediate fix):
-```bash
-aws ecr get-login-password --region eu-west-1 | \
-  docker login --username AWS --password-stdin \
-  719259376075.dkr.ecr.eu-west-1.amazonaws.com
-```
-
-**Files Modified:**
-- `../frontend/build_and_push.sh` (lines 18-27)
-- Added `aws_region` output to `outputs.tf`
-- Set `aws_region = "eu-west-1"` in `terraform.tfvars`
-
-**Verification:**
-```bash
-# Check ECR repositories region
-aws ecr describe-repositories --query 'repositories[?contains(repositoryName, `mra-mines`)].repositoryUri'
-
-# Verify build script detects correct region
-cd frontend
-./build_and_push.sh
-# Should show "Using AWS Region: eu-west-1"
-```
-
----
-
-### ✅ Issue 4: S3 Bucket Region Mismatch
-**Error Message:**
-```
-Error: reading S3 Bucket Versioning (mra-mines-prod-map-input): operation error S3:
-GetBucketVersioning, https response error StatusCode: 301, api error PermanentRedirect:
-The bucket you are attempting to access must be addressed using the specified endpoint.
-```
-
-**Root Cause:**
-- S3 buckets exist in eu-west-1
-- Terraform configured for eu-west-2
-- S3 requires region-specific endpoints
-
-**Solution:**
-Set correct region in `terraform.tfvars`:
-```hcl
-aws_region = "eu-west-1"
-```
-
-**Files Modified:**
-- `terraform.tfvars`
-
-**Verification:**
-```bash
-# Check bucket locations
-aws s3api get-bucket-location --bucket mra-mines-prod-map-input
-# Should return: eu-west-1
-```
-
----
-
-### ✅ Issue 5: Script Exits on Missing Terraform Output
-**Error Message:**
-```
-ERROR: Frontend deployment failed when executing deploy.sh script
-```
-(After successful image push and ECS update)
-
-**Root Cause:**
-- Script has `set -e` (exit on any error)
-- Command `terraform output -raw frontend_url` returns non-zero exit code when output doesn't exist
-- Even though error redirected to `/dev/null`, exit code still causes script to fail
-- This happened at the very end, making it appear deployment failed
-
-**Solution:**
-Added `|| true` to optional terraform output commands:
-```bash
-# Before:
-FRONTEND_URL=$(terraform output -raw frontend_url 2>/dev/null)
-
-# After:
-FRONTEND_URL=$(terraform output -raw frontend_url 2>/dev/null || true)
-```
-
-**Files Modified:**
-- `../frontend/build_and_push.sh` (line 73)
-- Added final success message (line 78)
-
-**Note:** The deployment was actually successful! The error was just the script's exit code.
-
----
-
-## Deployment Checklist
-
-Use this checklist to ensure smooth deployment:
-
-### Pre-Deployment
-- [ ] Verify AWS credentials are configured
-- [ ] Check AWS region matches resource locations
-- [ ] Confirm IAM roles exist (if using existing roles)
-- [ ] Ensure Docker is running
-- [ ] Review `terraform.tfvars` configuration
-
-### During Deployment
-- [ ] Run `terraform validate` first
-- [ ] Review `terraform plan` output
-- [ ] Check for IAM role conflicts
-- [ ] Verify ECR authentication succeeds
-- [ ] Monitor Docker image build progress
-
-### Post-Deployment
-- [ ] Verify ECS service is running
-- [ ] Check CloudWatch logs for errors
-- [ ] Test frontend URL (if available)
-- [ ] Confirm database connectivity
-
----
-
-## Quick Fixes
-
-### Manually Authenticate with ECR
-```bash
-# Replace <region> and <account-id> with your values
-aws ecr get-login-password --region <region> | \
-  docker login --username AWS --password-stdin \
-  <account-id>.dkr.ecr.<region>.amazonaws.com
-```
-
-### Force ECS Service Update
-```bash
-aws ecs update-service \
-  --cluster mra-mines-dev-cluster \
-  --service mra-mines-dev-frontend \
-  --force-new-deployment \
-  --region eu-west-1
-```
-
-### Check ECS Service Status
-```bash
+# Check service events
 aws ecs describe-services \
-  --cluster mra-mines-dev-cluster \
-  --services mra-mines-dev-frontend \
-  --region eu-west-1 \
-  --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Events:events[0:3]}'
+  --cluster $CLUSTER \
+  --services $SERVICE \
+  --region $REGION \
+  --query 'services[0].events[:5]'
+
+# Check stopped task reason
+aws ecs list-tasks --cluster $CLUSTER --desired-status STOPPED --region $REGION
 ```
 
-### View ECS Task Logs
+**Common Causes**:
+- ECR image not found: Run `./build_and_push.sh`
+- IAM role missing: Check `use_existing_iam_roles` setting
+- Memory/CPU insufficient: Increase in `terraform.tfvars`
+
+---
+
+### "AccessDenied" Errors
+
+**Symptom**: Application shows access denied errors.
+
+**Diagnosis**:
 ```bash
-# Get task ID
-TASK_ID=$(aws ecs list-tasks \
-  --cluster mra-mines-dev-cluster \
-  --service-name mra-mines-dev-frontend \
-  --region eu-west-1 \
-  --query 'taskArns[0]' \
-  --output text | cut -d'/' -f3)
+# Check task role
+aws ecs describe-task-definition \
+  --task-definition mra-mines-frontend-staging \
+  --query 'taskDefinition.taskRoleArn'
 
-# View logs
-aws logs tail "/ecs/mra-mines-dev-frontend" \
-  --follow \
-  --region eu-west-1
+# Check role policies
+ROLE_NAME="mra-mines-frontend-task-staging"
+aws iam list-attached-role-policies --role-name $ROLE_NAME
 ```
 
-### Check Terraform State
+**Solution**: Verify IAM roles have correct permissions for S3, DynamoDB, Cognito.
+
+---
+
+### Upload Fails
+
+**Symptom**: File upload returns error.
+
+**Diagnosis**:
+1. Check browser console for errors
+2. Check S3 bucket permissions
+3. Check Lambda logs:
+```bash
+aws logs tail /aws/lambda/mra-mines-input-handler-staging --follow
+```
+
+**Common Causes**:
+- Presigned URL expired (1 hour limit)
+- File too large (5GB limit)
+- Invalid ZIP format
+
+---
+
+### High Latency
+
+**Symptom**: Application is slow.
+
+**Diagnosis**:
+```bash
+# Check ECS task health
+aws ecs describe-services \
+  --cluster $CLUSTER \
+  --services $SERVICE \
+  --query 'services[0].{CPU:cpu,Memory:memory,Running:runningCount}'
+
+# Check ALB response times
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/ApplicationELB \
+  --metric-name TargetResponseTime \
+  --dimensions Name=LoadBalancer,Value=$ALB_ARN \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  --period 300 \
+  --statistics Average
+```
+
+**Solutions**:
+- Increase ECS CPU/memory
+- Check DynamoDB capacity
+- Review S3 transfer speeds
+
+---
+
+### Custom Domain Not Working
+
+**Symptom**: Custom domain doesn't resolve or shows certificate error.
+
+**Diagnosis**:
+```bash
+# Check DNS propagation
+dig mine-maps.com
+
+# Check ACM certificate status
+cd infra
+aws acm describe-certificate \
+  --certificate-arn $(terraform output -raw acm_certificate_arn) \
+  --query 'Certificate.Status'
+
+# Check Route53 nameservers
+terraform output route53_nameservers
+```
+
+**Common Causes**:
+- DNS not propagated: Wait up to 48 hours
+- Nameservers not updated at registrar
+- ACM certificate pending validation
+
+**Solution**: Ensure domain registrar nameservers match Route53 output.
+
+---
+
+### Webhook Notifications Not Received
+
+**Symptom**: Configured webhooks don't trigger.
+
+**Diagnosis**:
+```bash
+# Check webhooks table
+aws dynamodb scan --table-name mra-mines-webhooks-staging \
+  --query 'Items[*].{Id:webhookId.S,URL:url.S,Status:status.S}'
+
+# Check Lambda logs for webhook delivery
+aws logs tail /aws/lambda/mra-mines-output-handler-staging --since 1h
+```
+
+**Common Causes**:
+- Webhook URL unreachable
+- Invalid webhook configuration
+- Lambda timeout
+
+---
+
+## Diagnostic Commands
+
+### Check All Services
+
 ```bash
 cd infra
-terraform state list | grep iam_role
-terraform state show aws_iam_role.ecs_task_execution[0]
+
+# ECS
+echo "ECS Service:"
+aws ecs describe-services \
+  --cluster $(terraform output -raw ecs_cluster_name) \
+  --services $(terraform output -raw frontend_service_name) \
+  --region $(terraform output -raw aws_region) \
+  --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount}'
+
+# ALB
+echo "ALB Health:"
+aws elbv2 describe-target-health \
+  --target-group-arn $(terraform output -raw frontend_target_group_arn) \
+  --region $(terraform output -raw aws_region)
+
+# Cognito
+echo "Cognito Pool:"
+aws cognito-idp describe-user-pool \
+  --user-pool-id $(terraform output -raw cognito_user_pool_id) \
+  --region $(terraform output -raw aws_region) \
+  --query 'UserPool.Status'
 ```
 
----
+### View Recent Logs
 
-## Environment-Specific Configuration
+```bash
+# Frontend logs
+aws logs tail /ecs/mra-mines-frontend-staging --since 1h --follow
 
-### Development Environment
-```hcl
-# terraform.tfvars
-aws_region = "eu-west-1"
-environment = "dev"
-use_existing_iam_roles = true
+# Lambda logs
+aws logs tail /aws/lambda/mra-mines-input-handler-staging --since 1h
+aws logs tail /aws/lambda/mra-mines-output-handler-staging --since 1h
 ```
 
-### Production Environment
-```hcl
-# terraform.tfvars
-aws_region = "eu-west-1"
-environment = "prod"
-use_existing_iam_roles = true
+### Check Resource Usage
+
+```bash
+# DynamoDB
+aws dynamodb describe-table --table-name mra-mines-maps-staging \
+  --query 'Table.{Items:ItemCount,Size:TableSizeBytes}'
+
+# S3
+aws s3 ls s3://mra-mines-map-input-staging --summarize --recursive | tail -2
 ```
 
----
+## Getting Help
 
-## Common Questions
-
-### Q: Why does deployment show error but resources are created?
-A: The actual deployment succeeded. The error is from the script's exit code on optional commands. This has been fixed by adding `|| true` to optional operations.
-
-### Q: Can I use different IAM roles per environment?
-A: Yes! Use different role names in `existing_iam_role_names` for each environment, or set `use_existing_iam_roles = false` to create environment-specific roles.
-
-### Q: What if I want to create new IAM roles?
-A: Set `use_existing_iam_roles = false` in `terraform.tfvars`, or remove the variable entirely (defaults to false).
-
-### Q: How do I switch from using existing roles to creating new ones?
-A:
-1. Change `use_existing_iam_roles = false`
-2. Change `project_name` variable to avoid name conflicts
-3. Run `terraform plan` to review changes
-4. Run `terraform apply`
-
----
-
-## Support
-
-For additional help:
-1. Check CloudWatch Logs for detailed error messages
-2. Review [Changelog](changelog.md) for recent changes
-3. See [IAM Configuration](iam-configuration.md) for IAM role configuration details
-4. Check AWS service status: https://status.aws.amazon.com/
-
----
-
-## Summary of All Fixes
-
-| Issue | Status | Files Modified | Impact |
-|-------|--------|----------------|---------|
-| IAM roles already exist | ✅ Fixed | `variables.tf`, `iam_data.tf`, `terraform.tfvars` | Critical |
-| Build script not found | ✅ Fixed | `../scripts/deploy.sh` | Critical |
-| ECR auth failed | ✅ Fixed | `../frontend/build_and_push.sh`, `terraform.tfvars` | Critical |
-| S3 region mismatch | ✅ Fixed | `terraform.tfvars` | High |
-| Script exit on optional output | ✅ Fixed | `../frontend/build_and_push.sh` | Medium |
-
-All deployment blocking issues have been resolved. Deployment workflow is now fully functional.
+1. Check logs first
+2. Verify AWS credentials: `aws sts get-caller-identity`
+3. Check Terraform state: `terraform state list`
+4. Review recent changes: `git log --oneline -10`

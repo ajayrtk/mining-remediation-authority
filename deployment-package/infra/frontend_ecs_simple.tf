@@ -1,10 +1,7 @@
-# Frontend ECS service - runs the SvelteKit web application
-
-# ECR repository for frontend Docker images
 resource "aws_ecr_repository" "frontend" {
   name                 = "${var.project_name}-frontend-${var.environment}"
   image_tag_mutability = "MUTABLE"
-  force_delete         = true  # Allow deletion even if images exist
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true
@@ -13,13 +10,11 @@ resource "aws_ecr_repository" "frontend" {
   tags = local.tags
 }
 
-# Security group for frontend ECS tasks (receives traffic from ALB)
 resource "aws_security_group" "frontend_ecs" {
   name        = "${var.project_name}-frontend-sg-${var.environment}"
   description = "Security group for Frontend ECS tasks"
   vpc_id      = aws_vpc.main.id
 
-  # Allow HTTP from anywhere
   ingress {
     from_port   = 3000
     to_port     = 3000
@@ -28,7 +23,6 @@ resource "aws_security_group" "frontend_ecs" {
     description = "Allow HTTP from internet"
   }
 
-  # Allow all outbound traffic (for DynamoDB, S3, etc.)
   egress {
     from_port   = 0
     to_port     = 0
@@ -42,7 +36,6 @@ resource "aws_security_group" "frontend_ecs" {
   })
 }
 
-# IAM Role for Frontend ECS Task Execution
 resource "aws_iam_role" "frontend_task_execution" {
   count = var.use_existing_iam_roles ? 0 : 1
   name  = "${var.project_name}-frontend-task-execution-${var.environment}"
@@ -61,14 +54,12 @@ resource "aws_iam_role" "frontend_task_execution" {
   tags = local.tags
 }
 
-# Attach ECS Task Execution Policy
 resource "aws_iam_role_policy_attachment" "frontend_task_execution" {
   count      = var.use_existing_iam_roles ? 0 : 1
   role       = aws_iam_role.frontend_task_execution[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# IAM Role for Frontend ECS Task (Application Permissions)
 resource "aws_iam_role" "frontend_task" {
   count = var.use_existing_iam_roles ? 0 : 1
   name  = "${var.project_name}-frontend-task-${var.environment}"
@@ -87,7 +78,6 @@ resource "aws_iam_role" "frontend_task" {
   tags = local.tags
 }
 
-# Policy for Frontend Task to access DynamoDB and S3
 resource "aws_iam_role_policy" "frontend_task_permissions" {
   count = var.use_existing_iam_roles ? 0 : 1
   name  = "${var.project_name}-frontend-permissions-${var.environment}"
@@ -141,7 +131,6 @@ resource "aws_iam_role_policy" "frontend_task_permissions" {
   })
 }
 
-# CloudWatch Log Group for Frontend
 resource "aws_cloudwatch_log_group" "frontend" {
   name              = "/ecs/${var.project_name}-frontend-${var.environment}"
   retention_in_days = 7
@@ -149,13 +138,12 @@ resource "aws_cloudwatch_log_group" "frontend" {
   tags = local.tags
 }
 
-# ECS Task Definition for Frontend
 resource "aws_ecs_task_definition" "frontend" {
   family                   = "${var.project_name}-frontend-${var.environment}"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "256"  # 0.25 vCPU (cheaper than 0.5)
-  memory                   = "1024" # 1 GB (increased from 512 MB to prevent OOM)
+  cpu                      = "256"
+  memory                   = "1024"
   execution_role_arn       = local.frontend_task_execution_role_arn
   task_role_arn            = local.frontend_task_role_arn
 
@@ -178,7 +166,6 @@ resource "aws_ecs_task_definition" "frontend" {
         name  = "PORT"
         value = "3000"
       },
-      # Client-side (PUBLIC_) variables - available in browser
       {
         name  = "PUBLIC_AWS_REGION"
         value = var.aws_region
@@ -195,7 +182,6 @@ resource "aws_ecs_task_definition" "frontend" {
         name  = "PUBLIC_COGNITO_IDENTITY_POOL_ID"
         value = aws_cognito_identity_pool.main.id
       },
-      # Server-side variables - only available in server code
       {
         name  = "AWS_REGION"
         value = var.aws_region
@@ -216,7 +202,6 @@ resource "aws_ecs_task_definition" "frontend" {
         name  = "COGNITO_DOMAIN"
         value = "${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com"
       },
-      # Database and S3 configuration
       {
         name  = "MAPS_TABLE_NAME"
         value = aws_dynamodb_table.maps.name
@@ -241,13 +226,6 @@ resource "aws_ecs_task_definition" "frontend" {
         name  = "MAP_OUTPUT_BUCKET"
         value = aws_s3_bucket.map_outputs.bucket
       },
-      # SvelteKit ORIGIN - removed to allow multiple domains
-      # When ORIGIN is not set, SvelteKit auto-detects from Host header
-      # This allows both mine-maps.com and www.mine-maps.com to work
-      # {
-      #   name  = "ORIGIN"
-      #   value = var.enable_custom_domain ? "https://www.${var.domain_name}" : "https://${aws_lb.frontend.dns_name}"
-      # }
     ]
 
     logConfiguration = {
@@ -265,7 +243,6 @@ resource "aws_ecs_task_definition" "frontend" {
   tags = local.tags
 }
 
-# ECS Service for Frontend (With ALB Integration)
 resource "aws_ecs_service" "frontend" {
   name            = "${var.project_name}-frontend-${var.environment}"
   cluster         = aws_ecs_cluster.main.id
@@ -276,23 +253,20 @@ resource "aws_ecs_service" "frontend" {
   network_configuration {
     subnets          = [aws_subnet.public_a.id, aws_subnet.public_b.id]
     security_groups  = [aws_security_group.frontend_ecs.id]
-    assign_public_ip = true  # Keep public IP for internet access (no NAT Gateway needed)
+    assign_public_ip = true
   }
 
-  # Load Balancer Configuration
   load_balancer {
     target_group_arn = aws_lb_target_group.frontend.arn
     container_name   = "frontend"
     container_port   = 3000
   }
 
-  # Wait for ALB listener before creating service
   depends_on = [
     aws_lb_listener.frontend_http,
     aws_iam_role_policy.frontend_task_permissions
   ]
 
-  # Force new deployment when task definition changes
   force_new_deployment = true
 
   tags = local.tags

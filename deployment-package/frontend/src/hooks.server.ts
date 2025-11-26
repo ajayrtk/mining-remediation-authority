@@ -2,9 +2,12 @@ import type { Handle } from '@sveltejs/kit';
 import { type SessionCookie, fetchUserProfile, refreshTokens } from '$lib/server/cognito';
 import { getSession, updateSession, deleteSession } from '$lib/server/session-store';
 import { XRayTracing, parseTraceHeader, createTraceHeader, generateTraceId, generateSegmentId, addHttpResponse } from '$lib/server/tracing';
-import { generateCorrelationId } from '$lib/utils/correlation';
 
 const SESSION_COOKIE = 'mapml-session';
+
+function generateCorrelationId(): string {
+	return `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+}
 
 
 const cookieOptions = () => ({

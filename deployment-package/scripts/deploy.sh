@@ -59,7 +59,7 @@ fi
 echo ""
 
 # Step 1: Initialize and deploy infrastructure
-echo -e "${BLUE}[1/8]${NC} ${YELLOW}Initializing Terraform...${NC}"
+echo -e "${BLUE}[1/7]${NC} ${YELLOW}Initializing Terraform...${NC}"
 cd infra
 
 if ! terraform init; then
@@ -70,7 +70,7 @@ fi
 echo -e "${GREEN}✓${NC} Terraform initialized\n"
 
 # Step 2: Plan infrastructure
-echo -e "${BLUE}[2/8]${NC} ${YELLOW}Planning infrastructure changes...${NC}"
+echo -e "${BLUE}[2/7]${NC} ${YELLOW}Planning infrastructure changes...${NC}"
 if ! terraform plan -out=tfplan; then
     echo -e "${RED}ERROR: Terraform plan failed${NC}"
     exit 1
@@ -79,7 +79,7 @@ fi
 echo -e "${GREEN}✓${NC} Infrastructure plan created\n"
 
 # Step 3: Apply infrastructure
-echo -e "${BLUE}[3/8]${NC} ${YELLOW}Deploying infrastructure (this may take 5-10 minutes)...${NC}"
+echo -e "${BLUE}[3/7]${NC} ${YELLOW}Deploying infrastructure (this may take 5-10 minutes)...${NC}"
 if ! terraform apply tfplan; then
     echo -e "${RED}ERROR: Terraform apply failed${NC}"
     exit 1
@@ -95,7 +95,7 @@ echo -e "${GREEN}✓${NC} Infrastructure deployed\n"
 cd ..
 
 # Step 4: Build and push frontend
-echo -e "${BLUE}[4/8]${NC} ${YELLOW}Building and deploying frontend application...${NC}"
+echo -e "${BLUE}[4/7]${NC} ${YELLOW}Building and deploying frontend application...${NC}"
 echo "  • Installing dependencies..."
 cd frontend
 npm ci --silent
@@ -115,49 +115,12 @@ fi
 
 cd ../infra
 
-# Step 5: Build and push processor
-echo -e "${BLUE}[5/8]${NC} ${YELLOW}Building and deploying processor application...${NC}"
-echo "  • Building processor Docker image..."
-
-# Get ECR repository URL for processor
-PROCESSOR_ECR=$(terraform output -raw ecr_repository_url 2>/dev/null || echo "")
-
-if [ -z "$PROCESSOR_ECR" ]; then
-    echo -e "${RED}ERROR: Could not get processor ECR repository URL${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}Processor ECR Repository: ${PROCESSOR_ECR}${NC}"
-
-# Build and push processor image
-cd ecs_processor
-
-# Login to ECR
-echo "  • Logging in to ECR..."
-aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com
-
-# Build Docker image
-echo "  • Building Docker image for linux/amd64 platform..."
-docker build --platform linux/amd64 -t ${PROJECT_NAME}-processor:latest .
-
-# Tag the image
-echo "  • Tagging image..."
-docker tag ${PROJECT_NAME}-processor:latest ${PROCESSOR_ECR}:latest
-
-# Push to ECR
-echo "  • Pushing image to ECR..."
-docker push ${PROCESSOR_ECR}:latest
-
-echo -e "${GREEN}✓${NC} Processor image deployed to ECR\n"
-
-cd ..
-
 # Get service and cluster names
 SERVICE_NAME=$(terraform output -raw frontend_service_name 2>/dev/null || echo "")
 CLUSTER_NAME=$(terraform output -raw ecs_cluster_name 2>/dev/null || echo "")
 
-# Step 6: Wait for ECS deployment
-echo -e "${BLUE}[6/8]${NC} ${YELLOW}Waiting for ECS deployment to complete...${NC}"
+# Step 5: Wait for ECS deployment
+echo -e "${BLUE}[5/7]${NC} ${YELLOW}Waiting for ECS deployment to complete...${NC}"
 
 if [ -n "$SERVICE_NAME" ] && [ -n "$CLUSTER_NAME" ]; then
     echo "  • Waiting for ECS service to stabilize (this may take 2-3 minutes)..."
@@ -201,8 +164,8 @@ else
     echo -e "${YELLOW}⚠ ECS configuration not available${NC}\n"
 fi
 
-# Step 7: Verify Cognito configuration
-echo -e "${BLUE}[7/8]${NC} ${YELLOW}Verifying Cognito configuration...${NC}"
+# Step 6: Verify Cognito configuration
+echo -e "${BLUE}[6/7]${NC} ${YELLOW}Verifying Cognito configuration...${NC}"
 
 if [ -n "$APPLICATION_URL" ]; then
     echo "  • Application URL: $APPLICATION_URL"
@@ -212,8 +175,8 @@ else
     echo -e "${YELLOW}⚠${NC} Application URL not available\n"
 fi
 
-# Step 8: Create default admin user
-echo -e "${BLUE}[8/8]${NC} ${YELLOW}Creating default admin user...${NC}"
+# Step 7: Create default admin user
+echo -e "${BLUE}[7/7]${NC} ${YELLOW}Creating default admin user...${NC}"
 
 # Ensure we're in infra directory
 cd infra 2>/dev/null || true
@@ -383,6 +346,5 @@ if [ "$VERIFICATION_FAILED" = true ]; then
     echo -e "${YELLOW}Troubleshooting:${NC}"
     echo -e "  • Check logs: ${BLUE}aws logs tail /ecs/$SERVICE_NAME --follow --region $AWS_REGION${NC}"
     echo -e "  • Check ECS service: ${BLUE}aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME --region $AWS_REGION${NC}"
-    echo -e "  • Documentation: ${BLUE}docs/troubleshooting.md${NC}"
     echo ""
 fi

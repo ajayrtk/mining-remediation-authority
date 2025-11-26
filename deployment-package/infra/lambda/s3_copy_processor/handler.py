@@ -23,7 +23,6 @@ def iso_timestamp() -> str:
 
 
 def increment_processed_count(job_id: str) -> dict:
-    """Increment processedCount and return updated job info"""
     if not TABLE_NAME or not job_id:
         return {}
 
@@ -67,7 +66,6 @@ def increment_processed_count(job_id: str) -> dict:
 
 
 def update_map_output(map_id: str, map_name: str, output_bucket: str, output_key: str) -> None:
-    """Update MAP entry with output S3 location and mark as COMPLETED."""
     if not MAPS_TABLE_NAME:
         logger.warning("MAPS_TABLE_NAME not configured, skipping MAP update")
         return
@@ -104,12 +102,7 @@ def update_map_output(map_id: str, map_name: str, output_bucket: str, output_key
 
 
 def validate_event(event: dict) -> tuple[str, str, str, str]:
-    """
-    Validate and extract required fields from Lambda event.
-
-    Returns: (job_id, map_id, source_bucket, source_key)
-    Raises: ValueError if validation fails
-    """
+    """Validate and extract required fields from Lambda event."""
     if not isinstance(event, dict):
         raise ValueError(f"Event must be a dict, got {type(event).__name__}")
 
@@ -139,19 +132,7 @@ def validate_event(event: dict) -> tuple[str, str, str, str]:
 
 
 def lambda_handler(event, _context):
-    """
-    Copy ZIP file from input bucket to output bucket.
-    Triggered by the input handler after DynamoDB entry is created.
-
-    Expected event structure:
-    {
-        "jobId": "uuid",
-        "mapId": "map_xxx",
-        "bucket": "source-bucket-name",
-        "key": "source/object/key.zip",
-        "project": "project-name"
-    }
-    """
+    """Copy ZIP file from input bucket to output bucket."""
     if not TABLE_NAME or not OUTPUT_BUCKET:
         raise RuntimeError("Missing JOBS_TABLE_NAME or OUTPUT_BUCKET environment variables")
 
