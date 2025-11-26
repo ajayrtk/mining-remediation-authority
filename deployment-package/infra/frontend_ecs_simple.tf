@@ -155,7 +155,7 @@ resource "aws_ecs_task_definition" "frontend" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                      = "256"  # 0.25 vCPU (cheaper than 0.5)
-  memory                   = "512"  # 512 MB (cheaper than 1 GB)
+  memory                   = "1024" # 1 GB (increased from 512 MB to prevent OOM)
   execution_role_arn       = local.frontend_task_execution_role_arn
   task_role_arn            = local.frontend_task_role_arn
 

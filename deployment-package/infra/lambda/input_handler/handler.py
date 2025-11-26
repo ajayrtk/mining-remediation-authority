@@ -74,7 +74,7 @@ def validate_filename(filename: str) -> tuple[bool, str, str, str]:
     # Format 1: XX_XXXX (2 digits + separator + 4 digits)
     # Format 2: XXXXXX (6 consecutive digits)
     # Use regex with negative lookbehind to ensure pattern isn't preceded by digits
-    sheet_number_pattern = r'(?<!\d)(\d{2}[-\s_]\d{4}|\d{6})(?=[-\s_]|$)'
+    sheet_number_pattern = r'(?<!\d)(\d{2}[-\s_]\d{4}|\d{6})'
     match = re.search(sheet_number_pattern, name_without_ext)
 
     if not match:
@@ -286,16 +286,18 @@ def mark_failed(job_id: str, reason: str) -> None:
         logging.exception("Failed to mark job as failed", extra={"jobId": job_id})
 
 
-def launch_ecs_task(job_id: str, map_id: str, map_name: str, bucket: str, key: str) -> bool:
+def launch_ecs_task(job_id: str, map_id: str, map_name: str, bucket: str, key: str) -> tuple[bool, str | None]:
     """
     Launch ECS Fargate task to process the file
     This is the main processing path - each file gets its own ECS task
     The task will copy the file from input bucket to output bucket and update DynamoDB
+
+    Returns: (success: bool, task_arn: str | None)
     """
     # Make sure we have all the ECS config we need
     if not all([ECS_CLUSTER, ECS_TASK_DEFINITION, ECS_SUBNETS, ECS_SECURITY_GROUP]):
         logging.warning("ECS configuration incomplete, skipping ECS task launch")
-        return False
+        return False, None
 
     try:
         # Launch a new Fargate task
@@ -332,21 +334,21 @@ def launch_ecs_task(job_id: str, map_id: str, map_name: str, bucket: str, key: s
         if failures:
             failure_reasons = [f"{f.get('arn', 'unknown')}: {f.get('reason', 'unknown')}" for f in failures]
             logging.error(f"ECS task launch failures for job {job_id}: {', '.join(failure_reasons)}")
-            return False
+            return False, None
 
         # Validate that task was actually launched
         tasks = response.get("tasks", [])
         if not tasks:
             logging.error(f"No ECS tasks launched for job {job_id} - empty tasks array")
-            return False
+            return False, None
 
         task_arn = tasks[0]["taskArn"]
         logging.info(f"Successfully launched ECS task: {task_arn} for job {job_id}")
-        return True
+        return True, task_arn
 
     except ClientError as exc:
         logging.exception("Failed to launch ECS task", extra={"job_id": job_id, "error": str(exc)})
-        return False
+        return False, None
 
 
 def validate_s3_input_event(event: dict) -> bool:
@@ -575,7 +577,8 @@ def lambda_handler(event, _context):
         # Step 3: Launch the processing task
         try:
             # Try to launch ECS task (preferred method)
-            ecs_launched = launch_ecs_task(job_id, map_id, map_name, bucket, key)
+            ecs_launched, task_arn = launch_ecs_task(job_id, map_id, map_name, bucket, key)
+            dispatched_at = iso_timestamp()  # Capture exact dispatch time
 
             if ecs_launched:
                 # Success! Update job status to show we've dispatched it for processing
@@ -589,27 +592,36 @@ def lambda_handler(event, _context):
                     },
                 )
 
-                # Update individual map status to DISPATCHED
+                # Update individual map status to DISPATCHED with timing metrics
                 if MAPS_TABLE_NAME:
                     try:
+                        # Include dispatchedAt and taskArn for timing analysis
+                        update_expr = "SET #status = :status, updatedAt = :updated, dispatchedAt = :dispatched"
+                        expr_values = {
+                            ":status": {"S": "DISPATCHED"},
+                            ":updated": {"S": dispatched_at},
+                            ":dispatched": {"S": dispatched_at}
+                        }
+                        # Add taskArn if available
+                        if task_arn:
+                            update_expr += ", taskArn = :taskArn"
+                            expr_values[":taskArn"] = {"S": task_arn}
+
                         dynamo.update_item(
                             TableName=MAPS_TABLE_NAME,
                             Key={
                                 "mapId": {"S": map_id},
                                 "mapName": {"S": map_name}
                             },
-                            UpdateExpression="SET #status = :status, updatedAt = :updated",
+                            UpdateExpression=update_expr,
                             ExpressionAttributeNames={"#status": "status"},
-                            ExpressionAttributeValues={
-                                ":status": {"S": "DISPATCHED"},
-                                ":updated": {"S": timestamp}
-                            }
+                            ExpressionAttributeValues=expr_values
                         )
-                        logging.info(f"Updated map {map_id}/{map_name} status to DISPATCHED")
+                        logging.info(f"Updated map {map_id}/{map_name} status to DISPATCHED with taskArn={task_arn}")
                     except ClientError as exc:
                         logging.exception(f"Failed to update map {map_id} to DISPATCHED", extra={"error": str(exc)})
 
-                records.append({"jobId": job_id, "mapId": map_id, "bucket": bucket, "key": key, "status": "DISPATCHED"})
+                records.append({"jobId": job_id, "mapId": map_id, "bucket": bucket, "key": key, "status": "DISPATCHED", "taskArn": task_arn})
             else:
                 # ECS launch failed - fall back to Lambda processor
                 # This is a backup path in case ECS is unavailable
@@ -638,7 +650,7 @@ def lambda_handler(event, _context):
                     },
                 )
 
-                # Update individual map status to DISPATCHED
+                # Update individual map status to DISPATCHED with timing metrics
                 if MAPS_TABLE_NAME:
                     try:
                         dynamo.update_item(
@@ -647,11 +659,12 @@ def lambda_handler(event, _context):
                                 "mapId": {"S": map_id},
                                 "mapName": {"S": map_name}
                             },
-                            UpdateExpression="SET #status = :status, updatedAt = :updated",
+                            UpdateExpression="SET #status = :status, updatedAt = :updated, dispatchedAt = :dispatched",
                             ExpressionAttributeNames={"#status": "status"},
                             ExpressionAttributeValues={
                                 ":status": {"S": "DISPATCHED"},
-                                ":updated": {"S": timestamp}
+                                ":updated": {"S": dispatched_at},
+                                ":dispatched": {"S": dispatched_at}
                             }
                         )
                         logging.info(f"Updated map {map_id}/{map_name} status to DISPATCHED (Lambda fallback)")

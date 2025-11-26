@@ -88,6 +88,7 @@ variable "existing_iam_role_names" {
 		frontend_task_execution = optional(string)
 		frontend_task          = optional(string)
 		pre_auth_trigger       = optional(string)
+		ecs_state_handler      = optional(string)
 	})
 	description = "Names of existing IAM roles to use when use_existing_iam_roles is true"
 	default = {
@@ -99,6 +100,7 @@ variable "existing_iam_role_names" {
 		frontend_task_execution = null
 		frontend_task          = null
 		pre_auth_trigger       = null
+		ecs_state_handler      = null
 	}
 }
 

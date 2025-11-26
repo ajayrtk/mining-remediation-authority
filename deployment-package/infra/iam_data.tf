@@ -39,6 +39,11 @@ data "aws_iam_role" "existing_pre_auth_trigger" {
 	name  = var.existing_iam_role_names.pre_auth_trigger
 }
 
+data "aws_iam_role" "existing_ecs_state_handler" {
+	count = var.use_existing_iam_roles && lookup(var.existing_iam_role_names, "ecs_state_handler", null) != null ? 1 : 0
+	name  = var.existing_iam_role_names.ecs_state_handler
+}
+
 # Local values to determine which role ARN/name to use
 locals {
 	input_handler_role_arn = var.use_existing_iam_roles && var.existing_iam_role_names.input_handler != null ? data.aws_iam_role.existing_input_handler[0].arn : (length(aws_iam_role.input_handler) > 0 ? aws_iam_role.input_handler[0].arn : null)
@@ -63,4 +68,6 @@ locals {
 	frontend_task_role_id  = var.use_existing_iam_roles && var.existing_iam_role_names.frontend_task != null ? data.aws_iam_role.existing_frontend_task[0].id : (length(aws_iam_role.frontend_task) > 0 ? aws_iam_role.frontend_task[0].id : null)
 
 	pre_auth_trigger_role_arn = var.use_existing_iam_roles && var.existing_iam_role_names.pre_auth_trigger != null ? data.aws_iam_role.existing_pre_auth_trigger[0].arn : (length(aws_iam_role.pre_auth_trigger) > 0 ? aws_iam_role.pre_auth_trigger[0].arn : null)
+
+	ecs_state_handler_role_arn = var.use_existing_iam_roles && lookup(var.existing_iam_role_names, "ecs_state_handler", null) != null ? data.aws_iam_role.existing_ecs_state_handler[0].arn : (length(aws_iam_role.ecs_state_handler) > 0 ? aws_iam_role.ecs_state_handler[0].arn : null)
 }

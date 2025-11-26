@@ -56,7 +56,7 @@ def get_sheet_number_from_filename(filename: str) -> str:
     # Format 1: XX_XXXX (2 digits + separator + 4 digits)
     # Format 2: XXXXXX (6 consecutive digits)
     # Use negative lookbehind to ensure pattern isn't preceded by digits
-    sheet_number_pattern = r'(?<!\d)(\d{2}[-\s_]\d{4}|\d{6})(?=[-\s_]|$)'
+    sheet_number_pattern = r'(?<!\d)(\d{2}[-\s_]\d{4}|\d{6})'
     match = re.search(sheet_number_pattern, name_without_ext)
 
     if not match:
@@ -66,6 +66,11 @@ def get_sheet_number_from_filename(filename: str) -> str:
     # Extract sheet number (remove any separators to get 6 digits)
     sheet_number_raw = match.group(1)
     sheet_number = re.sub(r'\D', '', sheet_number_raw)
+
+    # Check if there are extra digits immediately after the match (e.g., 7 digits instead of 6)
+    match_end = match.end()
+    if match_end < len(name_without_ext) and name_without_ext[match_end].isdigit():
+        return None  # Extra digits found - invalid format
 
     # Everything before the sheet number pattern is the seam ID
     sheet_number_start_index = match.start()
@@ -105,31 +110,47 @@ def get_filename_validation_error(filename: str) -> str:
         )
 
     # Look for 6-digit sheet number pattern
-    sheet_number_pattern = r'(?<!\d)(\d{2}[-\s_]\d{4}|\d{6})(?=[-\s_]|$)'
+    sheet_number_pattern = r'(?<!\d)(\d{2}[-\s_]\d{4}|\d{6})'
     match = re.search(sheet_number_pattern, name_without_ext)
 
     if not match:
         # No valid sheet number pattern found
-        all_digits = re.sub(r'\D', '', name_without_ext)
-        if len(all_digits) == 0:
+        # Try to extract sheet number portion (after first underscore)
+        parts = name_without_ext.split('_', 1)
+        if len(parts) == 2:
+            sheet_portion = parts[1].rstrip('_')  # Remove trailing underscores
+            sheet_digits = re.sub(r'\D', '', sheet_portion)
+        else:
+            sheet_digits = re.sub(r'\D', '', name_without_ext)
+
+        if len(sheet_digits) == 0:
             return (
                 f"No digits found. "
                 f"Sheet number must be exactly 6 digits in format XXXXXX or XX_XXXX."
             )
-        elif len(all_digits) < 6:
+        elif len(sheet_digits) < 6:
             return (
-                f"Sheet number must be exactly 6 digits, found {len(all_digits)} digits. "
+                f"Sheet number must be exactly 6 digits, found {len(sheet_digits)} digits. "
                 f"Expected format: SeamID_SheetNumber.zip (e.g., '16516_433857.zip' or '43_43_3857.zip')"
             )
         else:
             return (
-                f"Found {len(all_digits)} digits but sheet number format is incorrect. "
-                f"Expected 6 digits in format XXXXXX or XX_XXXX (e.g., '433857' or '43_3857')."
+                f"Sheet number format mismatch: found {len(sheet_digits)} digits, expected exactly 6 digits in format XX_XXXX or XXXXXX."
             )
 
     # Extract sheet number info
     sheet_number_start_index = match.start()
+    match_end = match.end()
     seam_id = name_without_ext[:sheet_number_start_index]
+
+    # Check if there are extra digits immediately after the match (e.g., 7 digits instead of 6)
+    if match_end < len(name_without_ext) and name_without_ext[match_end].isdigit():
+        # Count total digits in sheet number portion
+        sheet_portion = name_without_ext[sheet_number_start_index:].rstrip('_')
+        sheet_digits = re.sub(r'\D', '', sheet_portion)
+        return (
+            f"Sheet number format mismatch: found {len(sheet_digits)} digits, expected exactly 6 digits in format XX_XXXX or XXXXXX."
+        )
 
     # Check if seam ID ends with underscore
     if not seam_id or not seam_id.endswith('_'):

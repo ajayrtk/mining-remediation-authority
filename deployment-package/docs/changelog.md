@@ -1,5 +1,60 @@
 # Changelog
 
+## 2025-11-25 - Processing Time Optimization (Phase 1: Timing Metrics)
+
+### Added
+- **ECS Task State Handler Lambda** (`infra/lambda/ecs_state_handler/handler.py`)
+  - New Lambda function to capture ECS task lifecycle events
+  - Captures `taskStartedAt` when task transitions to RUNNING
+  - Captures `taskStoppedAt` when task completes or fails
+  - Updates map records in DynamoDB with timing metrics
+
+- **EventBridge Rule for ECS State Changes** (`infra/ecs_events.tf`)
+  - Triggers ecs_state_handler Lambda on ECS task state changes
+  - Filters for RUNNING and STOPPED states in the ECS cluster
+
+- **Timing Metrics in DynamoDB**
+  - New fields added to maps table:
+    - `dispatchedAt` - When Lambda triggers ECS task
+    - `taskArn` - ECS task ARN for tracking
+    - `taskStartedAt` - When container starts running
+    - `taskStoppedAt` - When task completes/fails
+
+### Changed
+- **input_handler Lambda** (`infra/lambda/input_handler/handler.py`)
+  - Now captures `dispatchedAt` timestamp immediately after launching ECS task
+  - Now captures and stores `taskArn` in DynamoDB
+  - `launch_ecs_task()` returns tuple `(success, task_arn)` instead of just `bool`
+
+- **Maps Page** (`frontend/src/routes/maps/+page.svelte`)
+  - Added expandable timing details for each map row
+  - Click on map name to see Processing Timeline
+  - Shows: Queue Time, Startup Time, Processing Time, Total Time
+  - Displays ECS task ID when available
+
+- **Maps Server** (`frontend/src/routes/maps/+page.server.ts`)
+  - `MapEntry` type extended with timing fields
+  - Fetch includes dispatchedAt, taskArn, taskStartedAt, taskStoppedAt
+
+### Infrastructure
+- New IAM role: `mra-mines-ecs-state-handler-staging`
+- New Lambda: `mra-mines-ecs-state-handler-staging`
+- New EventBridge rule: `mra-mines-ecs-task-state-staging`
+
+### Analysis Results
+Processing time analysis of 3 maps (17836_269486, 17836_269487, 17836_269488) revealed:
+- Maps uploaded within 3 seconds of each other
+- Processed **sequentially**, not in parallel
+- Total batch time: ~12 minutes
+- If parallel: could be ~7 minutes (40% improvement potential)
+
+### Next Steps
+- Phase 2: Investigate ECS task concurrency constraints
+- Verify if parallel processing can be enabled
+- Consider processor team involvement for internal optimizations
+
+---
+
 ## 2025-11-25 - Documentation Update & Cleanup
 
 ### Documentation Updated

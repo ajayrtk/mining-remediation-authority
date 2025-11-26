@@ -78,31 +78,6 @@
 	// Check if any files have already been uploaded or have backend errors
 	$: hasUploadedOrErrorFiles = uploadProgress.some((p) => p.status === 'done' || p.status === 'error');
 
-	// Determine appropriate warning message based on file states
-	$: warningMessage = (() => {
-		const hasUploaded = uploadProgress.some((p) => p.status === 'done');
-		const hasErrors = uploadProgress.some((p) => p.status === 'error');
-		const hasInvalid = uploadProgress.some((p) => p.status === 'invalid');
-
-		const errorCount = uploadProgress.filter(p => p.status === 'error').length;
-		const invalidCount = uploadProgress.filter(p => p.status === 'invalid').length;
-
-		if (hasUploaded && (hasErrors || hasInvalid)) {
-			return 'Remove uploaded or rejected files to submit new files.';
-		} else if (hasUploaded) {
-			return 'Remove uploaded files to submit new files.';
-		} else if (hasErrors && hasInvalid) {
-			return `${invalidCount} validation error(s) and ${errorCount} duplicate(s) detected. Remove to continue.`;
-		} else if (hasInvalid) {
-			const plural = invalidCount > 1 ? 's' : '';
-			return `${invalidCount} file${plural} failed validation. Remove invalid files before submitting.`;
-		} else if (hasErrors) {
-			const plural = errorCount > 1 ? 's' : '';
-			return `${errorCount} duplicate${plural} detected. Remove to submit new files.`;
-		}
-		return 'Cannot submit at this time.';
-	})();
-
 	// Calculate job statistics for dashboard based on actual map statuses
 	const inProgressStatuses = ['QUEUED', 'DISPATCHED', 'PROCESSING', 'AWAITING_OUTPUT'];
 	const completedStatuses = ['COMPLETED'];

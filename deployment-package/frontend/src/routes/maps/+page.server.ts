@@ -19,6 +19,11 @@ export type MapEntry = {
 		key: string;
 		url: string;
 	};
+	// Timing metrics for performance analysis
+	dispatchedAt?: string;    // When Lambda dispatched ECS task
+	taskArn?: string;         // ECS task ARN
+	taskStartedAt?: string;   // When ECS task started running
+	taskStoppedAt?: string;   // When ECS task stopped
 };
 
 const fetchMaps = async (limit: number = 50, lastKey?: any): Promise<{ maps: MapEntry[], lastEvaluatedKey?: any }> => {
@@ -38,7 +43,7 @@ const fetchMaps = async (limit: number = 50, lastKey?: any): Promise<{ maps: Map
 
 		const result = await dynamoDocClient.send(new ScanCommand(params));
 
-		// Map the items with their individual status
+		// Map the items with their individual status and timing metrics
 		const mapsWithStatus = (result.Items ?? []).map((item) => {
 			return {
 				mapId: String(item.mapId ?? ''),
@@ -50,7 +55,12 @@ const fetchMaps = async (limit: number = 50, lastKey?: any): Promise<{ maps: Map
 				mapVersion: item.mapVersion ? Number(item.mapVersion) : undefined,
 				jobId: item.jobId ? String(item.jobId) : undefined,
 				jobStatus: item.status ? String(item.status) : undefined,
-				s3Output: item.s3Output
+				s3Output: item.s3Output,
+				// Timing metrics
+				dispatchedAt: item.dispatchedAt ? String(item.dispatchedAt) : undefined,
+				taskArn: item.taskArn ? String(item.taskArn) : undefined,
+				taskStartedAt: item.taskStartedAt ? String(item.taskStartedAt) : undefined,
+				taskStoppedAt: item.taskStoppedAt ? String(item.taskStoppedAt) : undefined
 			};
 		});
 

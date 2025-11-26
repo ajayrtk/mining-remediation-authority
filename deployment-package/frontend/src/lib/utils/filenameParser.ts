@@ -60,7 +60,7 @@ export function parseMapFilename(filename: string): ParsedFilename {
 	// Format 2: XXXXXX (6 consecutive digits)
 	// Use regex with negative lookbehind to ensure pattern isn't preceded by digits
 
-	const sheetNumberPattern = /(?<!\d)(\d{2}[-\s_]\d{4}|\d{6})(?=[-\s_]|$)/;
+	const sheetNumberPattern = /(?<!\d)(\d{2}[-\s_]\d{4}|\d{6})/;
 	const match = nameWithoutExt.match(sheetNumberPattern);
 
 	if (!match) {

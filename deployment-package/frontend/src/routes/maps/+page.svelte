@@ -197,6 +197,83 @@
 		return `${bytes} B`;
 	};
 
+	// Format duration in human readable format
+	const formatDuration = (ms: number): string => {
+		if (ms < 0) return '—';
+		const seconds = Math.floor(ms / 1000);
+		const minutes = Math.floor(seconds / 60);
+		const remainingSeconds = seconds % 60;
+		if (minutes > 0) {
+			return `${minutes}m ${remainingSeconds}s`;
+		}
+		return `${seconds}s`;
+	};
+
+	// Calculate timing metrics for a map
+	const getTimingMetrics = (map: MapEntry) => {
+		const metrics: { label: string; value: string; description: string }[] = [];
+
+		if (!map.createdAt) return metrics;
+
+		const created = new Date(map.createdAt).getTime();
+		const dispatched = map.dispatchedAt ? new Date(map.dispatchedAt).getTime() : null;
+		const started = map.taskStartedAt ? new Date(map.taskStartedAt).getTime() : null;
+		const processed = map.processedAt ? new Date(map.processedAt).getTime() : null;
+		const stopped = map.taskStoppedAt ? new Date(map.taskStoppedAt).getTime() : null;
+
+		// Queue time: createdAt -> dispatchedAt
+		if (dispatched) {
+			const queueTime = dispatched - created;
+			metrics.push({
+				label: 'Queue Time',
+				value: formatDuration(queueTime),
+				description: 'Time waiting in queue before dispatch'
+			});
+		}
+
+		// Startup time: dispatchedAt -> taskStartedAt
+		if (dispatched && started) {
+			const startupTime = started - dispatched;
+			metrics.push({
+				label: 'Startup Time',
+				value: formatDuration(startupTime),
+				description: 'ECS task provisioning and container startup'
+			});
+		}
+
+		// Processing time: taskStartedAt -> processedAt or taskStoppedAt
+		if (started) {
+			const endTime = processed || stopped;
+			if (endTime) {
+				const processingTime = endTime - started;
+				metrics.push({
+					label: 'Processing Time',
+					value: formatDuration(processingTime),
+					description: 'Actual map processing duration'
+				});
+			}
+		}
+
+		// Total time: createdAt -> processedAt
+		if (processed) {
+			const totalTime = processed - created;
+			metrics.push({
+				label: 'Total Time',
+				value: formatDuration(totalTime),
+				description: 'End-to-end processing time'
+			});
+		}
+
+		return metrics;
+	};
+
+	// Expanded row state for timing details
+	let expandedMapId: string | null = null;
+
+	const toggleExpanded = (mapId: string) => {
+		expandedMapId = expandedMapId === mapId ? null : mapId;
+	};
+
 	const removeZipExtension = (filename: string) => filename.replace(/\.zip$/i, '');
 
 	const nextPage = () => {
@@ -677,7 +754,7 @@
 						</thead>
 						<tbody>
 							{#each paginatedMaps as map}
-								<tr>
+								<tr class:expanded={expandedMapId === map.mapId}>
 									<td class="checkbox-column">
 										<input
 											type="checkbox"
@@ -688,7 +765,14 @@
 										/>
 									</td>
 									<td>
-										<strong class="map-name">{removeZipExtension(map.mapName)}</strong>
+										<button class="map-name-button" on:click={() => toggleExpanded(map.mapId)} title="Click to view timing details">
+											<strong class="map-name">{removeZipExtension(map.mapName)}</strong>
+											<span class="expand-icon" class:rotated={expandedMapId === map.mapId}>
+												<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+													<polyline points="6 9 12 15 18 9"></polyline>
+												</svg>
+											</span>
+										</button>
 									</td>
 									<td>{map.ownerEmail}</td>
 									<td class="align-right">{formatBytes(map.sizeBytes)}</td>
@@ -757,6 +841,32 @@
 										</div>
 									</td>
 								</tr>
+								{#if expandedMapId === map.mapId}
+									{@const metrics = getTimingMetrics(map)}
+									<tr class="timing-row">
+										<td colspan="8">
+											<div class="timing-details">
+												<h4>Processing Timeline</h4>
+												{#if metrics.length > 0}
+													<div class="timing-grid">
+														{#each metrics as metric}
+															<div class="timing-metric">
+																<span class="timing-label">{metric.label}</span>
+																<span class="timing-value">{metric.value}</span>
+																<span class="timing-desc">{metric.description}</span>
+															</div>
+														{/each}
+													</div>
+												{:else}
+													<p class="timing-empty">Timing data not yet available. Metrics are captured after processing begins.</p>
+												{/if}
+												{#if map.taskArn}
+													<p class="task-arn">Task: {map.taskArn.split('/').pop()}</p>
+												{/if}
+											</div>
+										</td>
+									</tr>
+								{/if}
 							{/each}
 						</tbody>
 					</table>
@@ -1734,5 +1844,112 @@
 
 	.spinning {
 		animation: spin 1s linear infinite;
+	}
+
+	/* Map name button for expanding timing details */
+	.map-name-button {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		background: none;
+		border: none;
+		padding: 0;
+		cursor: pointer;
+		text-align: left;
+		color: inherit;
+	}
+
+	.map-name-button:hover .map-name {
+		text-decoration: underline;
+	}
+
+	.expand-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--text-muted);
+		transition: transform 0.2s ease;
+	}
+
+	.expand-icon.rotated {
+		transform: rotate(180deg);
+	}
+
+	/* Expanded row styling */
+	tr.expanded {
+		background: var(--accent-soft) !important;
+	}
+
+	/* Timing row */
+	.timing-row {
+		background: var(--background-surface-muted) !important;
+	}
+
+	.timing-row td {
+		padding: 0 !important;
+		border-top: none !important;
+	}
+
+	.timing-details {
+		padding: 1rem 1.5rem;
+		border-top: 1px dashed var(--border-subtle);
+	}
+
+	.timing-details h4 {
+		margin: 0 0 0.75rem;
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: var(--text-primary);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.timing-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+		gap: 1rem;
+	}
+
+	.timing-metric {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		padding: 0.75rem;
+		background: var(--background-surface);
+		border-radius: 0.5rem;
+		border: 1px solid var(--border-subtle);
+	}
+
+	.timing-label {
+		font-size: 0.7rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--text-muted);
+	}
+
+	.timing-value {
+		font-size: 1.25rem;
+		font-weight: 700;
+		color: var(--accent-primary);
+	}
+
+	.timing-desc {
+		font-size: 0.75rem;
+		color: var(--text-tertiary);
+	}
+
+	.timing-empty {
+		color: var(--text-muted);
+		font-size: 0.85rem;
+		font-style: italic;
+		margin: 0;
+	}
+
+	.task-arn {
+		margin: 0.75rem 0 0;
+		font-size: 0.75rem;
+		color: var(--text-tertiary);
+		font-family: monospace;
 	}
 </style>
