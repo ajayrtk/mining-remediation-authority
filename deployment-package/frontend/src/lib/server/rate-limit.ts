@@ -107,29 +107,29 @@ export function checkRateLimit(
  * Preset rate limit configurations for common use cases
  */
 export const RateLimitPresets = {
-	/** Strict limit for expensive operations (10 requests per minute) */
+	/** Strict limit for expensive operations (50 requests per minute) */
 	STRICT: {
-		maxRequests: 10,
+		maxRequests: 50,
 		windowMs: 60 * 1000
 	},
-	/** Standard limit for normal API endpoints (60 requests per minute) */
+	/** Standard limit for normal API endpoints (300 requests per minute) */
 	STANDARD: {
-		maxRequests: 60,
-		windowMs: 60 * 1000
-	},
-	/** API limit for general API operations (100 requests per minute) */
-	API: {
-		maxRequests: 100,
-		windowMs: 60 * 1000
-	},
-	/** Generous limit for lightweight operations (300 requests per minute) */
-	GENEROUS: {
 		maxRequests: 300,
 		windowMs: 60 * 1000
 	},
-	/** Upload limit (20 uploads per hour to prevent abuse) */
+	/** API limit for general API operations (500 requests per minute) */
+	API: {
+		maxRequests: 500,
+		windowMs: 60 * 1000
+	},
+	/** Generous limit for lightweight operations (1500 requests per minute) */
+	GENEROUS: {
+		maxRequests: 1500,
+		windowMs: 60 * 1000
+	},
+	/** Upload limit (100 uploads per hour) */
 	UPLOAD: {
-		maxRequests: 20,
+		maxRequests: 100,
 		windowMs: 60 * 60 * 1000
 	}
 } as const;
