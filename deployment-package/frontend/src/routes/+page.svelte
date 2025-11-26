@@ -11,7 +11,7 @@
 
 	export let data: PageData;
 
-	const MAX_FILES = 20;
+	const MAX_FILES = 10;
 	const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200MB (matches backend BODY_SIZE_LIMIT)
 
 	let selectedFiles: File[] = [];

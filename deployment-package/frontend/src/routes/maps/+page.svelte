@@ -26,7 +26,7 @@
 	let bulkDownloading = false;
 
 	// Sort state
-	let sortColumn: 'mapName' | 'ownerEmail' | 'sizeBytes' | 'createdAt' | 'jobStatus' = 'createdAt';
+	let sortColumn: 'mapName' | 'ownerEmail' | 'outputSizeBytes' | 'createdAt' | 'jobStatus' = 'createdAt';
 	let sortDirection: 'asc' | 'desc' = 'desc';
 
 	// User menu state
@@ -71,8 +71,8 @@
 			case 'ownerEmail':
 				compareResult = a.ownerEmail.localeCompare(b.ownerEmail);
 				break;
-			case 'sizeBytes':
-				compareResult = (a.sizeBytes ?? 0) - (b.sizeBytes ?? 0);
+			case 'outputSizeBytes':
+				compareResult = (a.outputSizeBytes ?? 0) - (b.outputSizeBytes ?? 0);
 				break;
 			case 'createdAt':
 				compareResult = (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
@@ -730,9 +730,9 @@
 										{/if}
 									</span>
 								</th>
-								<th class="sortable align-center" on:click={() => handleSort('sizeBytes')} style="text-align: center;">
+								<th class="sortable align-center" on:click={() => handleSort('outputSizeBytes')} style="text-align: center;">
 										Size
-										{#if sortColumn === 'sizeBytes'}
+										{#if sortColumn === 'outputSizeBytes'}
 											<span class="sort-arrow">{sortDirection === 'asc' ? '↑' : '↓'}</span>
 										{/if}
 								</th>
@@ -775,7 +775,7 @@
 										</button>
 									</td>
 									<td>{map.ownerEmail}</td>
-									<td class="align-right">{formatBytes(map.sizeBytes)}</td>
+									<td class="align-right">{formatBytes(map.outputSizeBytes)}</td>
 									<td class="align-right">{formatDate(map.createdAt)}</td>
 									<td class="align-center">
 										{#if map.jobStatus}

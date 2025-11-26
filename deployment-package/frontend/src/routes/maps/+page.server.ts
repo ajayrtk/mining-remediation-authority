@@ -1,7 +1,9 @@
 // Maps registry data loader - fetches all processed maps from DynamoDB
 
 import { ScanCommand } from '@aws-sdk/lib-dynamodb';
+import { HeadObjectCommand } from '@aws-sdk/client-s3';
 import { MAPS_TABLE, dynamoDocClient } from '$lib/server/dynamo';
+import { s3Client, MAP_OUTPUT_BUCKET } from '$lib/server/s3';
 import type { PageServerLoad } from './$types';
 
 export type MapEntry = {
@@ -10,7 +12,8 @@ export type MapEntry = {
 	ownerEmail: string;
 	createdAt: string;
 	processedAt?: string;
-	sizeBytes?: number;
+	inputSizeBytes?: number;  // Input file size (uploaded ZIP)
+	outputSizeBytes?: number; // Output file size (processed ZIP)
 	mapVersion?: number;
 	jobId?: string;
 	jobStatus?: string;
@@ -24,6 +27,17 @@ export type MapEntry = {
 	taskArn?: string;         // ECS task ARN
 	taskStartedAt?: string;   // When ECS task started running
 	taskStoppedAt?: string;   // When ECS task stopped
+};
+
+// Helper to fetch output size from S3
+const getOutputSizeFromS3 = async (bucket: string, key: string): Promise<number | undefined> => {
+	try {
+		const response = await s3Client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+		return response.ContentLength;
+	} catch (error) {
+		console.warn(`[maps] Failed to get output size for ${key}:`, error);
+		return undefined;
+	}
 };
 
 const fetchMaps = async (limit: number = 50, lastKey?: any): Promise<{ maps: MapEntry[], lastEvaluatedKey?: any }> => {
@@ -45,13 +59,19 @@ const fetchMaps = async (limit: number = 50, lastKey?: any): Promise<{ maps: Map
 
 		// Map the items with their individual status and timing metrics
 		const mapsWithStatus = (result.Items ?? []).map((item) => {
+			// Read inputSizeBytes with fallback to sizeBytes for backwards compatibility
+			const inputSizeBytes = item.inputSizeBytes
+				? Number(item.inputSizeBytes)
+				: (item.sizeBytes ? Number(item.sizeBytes) : undefined);
+
 			return {
 				mapId: String(item.mapId ?? ''),
 				mapName: String(item.mapName ?? ''),
 				ownerEmail: String(item.ownerEmail ?? ''),
 				createdAt: String(item.createdAt ?? ''),
 				processedAt: item.processedAt ? String(item.processedAt) : undefined,
-				sizeBytes: item.sizeBytes ? Number(item.sizeBytes) : undefined,
+				inputSizeBytes,
+				outputSizeBytes: item.outputSizeBytes ? Number(item.outputSizeBytes) : undefined,
 				mapVersion: item.mapVersion ? Number(item.mapVersion) : undefined,
 				jobId: item.jobId ? String(item.jobId) : undefined,
 				jobStatus: item.status ? String(item.status) : undefined,
@@ -64,8 +84,26 @@ const fetchMaps = async (limit: number = 50, lastKey?: any): Promise<{ maps: Map
 			};
 		});
 
+		// For COMPLETED maps without outputSizeBytes, fetch from S3
+		const mapsWithOutputSizes = await Promise.all(
+			mapsWithStatus.map(async (map) => {
+				// If outputSizeBytes is already set, use it
+				if (map.outputSizeBytes !== undefined) {
+					return map;
+				}
+
+				// For COMPLETED maps with s3Output, fetch size from S3
+				if (map.jobStatus === 'COMPLETED' && map.s3Output?.bucket && map.s3Output?.key) {
+					const outputSize = await getOutputSizeFromS3(map.s3Output.bucket, map.s3Output.key);
+					return { ...map, outputSizeBytes: outputSize };
+				}
+
+				return map;
+			})
+		);
+
 		return {
-			maps: mapsWithStatus,
+			maps: mapsWithOutputSizes,
 			lastEvaluatedKey: result.LastEvaluatedKey
 		};
 	} catch (error) {

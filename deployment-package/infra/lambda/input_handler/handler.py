@@ -178,7 +178,7 @@ def create_map_entry(map_id: str, map_name: str, owner_email: str, size_bytes: i
                 "mapName": {"S": map_name},  # Sanitized filename
                 "ownerEmail": {"S": owner_email},
                 "createdAt": {"S": timestamp},
-                "sizeBytes": {"N": str(size_bytes)},
+                "inputSizeBytes": {"N": str(size_bytes)},
                 "mapVersion": {"N": "1"},
                 "jobId": {"S": job_id},
                 "status": {"S": "QUEUED"}  # Start in QUEUED state
@@ -500,7 +500,7 @@ def lambda_handler(event, _context):
                             "mapName": {"S": map_name},
                             "ownerEmail": {"S": submitted_by},
                             "createdAt": {"S": timestamp},
-                            "sizeBytes": {"N": str(size_bytes)},
+                            "inputSizeBytes": {"N": str(size_bytes)},
                             "mapVersion": {"N": "1"},
                             "jobId": {"S": job_id},
                             "status": {"S": "FAILED"},
