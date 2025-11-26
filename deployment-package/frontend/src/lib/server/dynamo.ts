@@ -1,7 +1,6 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { env } from '$env/dynamic/private';
-import { dynamoCircuitBreaker } from './circuit-breaker';
 
 export const MAP_JOBS_TABLE = env.MAP_JOBS_TABLE ?? 'map-jobs';
 export const MAPS_TABLE = env.MAPS_TABLE ?? 'maps';
@@ -36,5 +35,5 @@ function getClient() {
 }
 
 export const dynamoDocClient = {
-	send: (command: any) => dynamoCircuitBreaker.execute(() => getClient().send(command))
+	send: (command: any) => getClient().send(command)
 };
