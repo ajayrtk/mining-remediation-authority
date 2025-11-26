@@ -1,3 +1,5 @@
+# ECS task state change handler - tracks processing status
+
 data "archive_file" "ecs_state_handler" {
 	type        = "zip"
 	source_dir  = "${path.module}/lambda/ecs_state_handler"

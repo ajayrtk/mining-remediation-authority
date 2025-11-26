@@ -1,3 +1,5 @@
+# Lambda functions for processing map uploads
+
 data "archive_file" "input_handler" {
 	type        = "zip"
 	source_dir  = "${path.module}/lambda/input_handler"

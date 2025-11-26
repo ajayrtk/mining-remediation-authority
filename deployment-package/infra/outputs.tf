@@ -1,3 +1,5 @@
+# Output values for MRA Mines infrastructure
+
 output "aws_region" {
 	value       = var.aws_region
 	description = "AWS region where resources are deployed"
@@ -93,7 +95,7 @@ output "public_subnet_ids" {
 # Main application URL
 output "application_url" {
 	value       = var.enable_custom_domain ? "https://www.${var.domain_name}" : "https://${aws_lb.frontend.dns_name}"
-	description = "⭐ Main application URL (HTTPS) - Use this to access the application"
+	description = "Main application URL (HTTPS)"
 }
 
 output "project_name" {
@@ -129,30 +131,16 @@ output "acm_certificate_arn" {
 
 output "custom_domain_setup_instructions" {
 	value = var.enable_custom_domain ? join("\n", [
+		"Custom Domain Setup:",
 		"",
-		"========================================",
-		"Custom Domain Setup Instructions",
-		"========================================",
-		"",
-		"1. Update Name Servers at Domain Registrar:",
-		"   Go to your domain registrar (e.g., GoDaddy, Namecheap, Route 53)",
-		"   Update the name servers for ${var.domain_name} to:",
+		"1. Update name servers at your domain registrar to:",
 		join("\n   ", aws_route53_zone.main[0].name_servers),
 		"",
-		"2. Wait for DNS Propagation (5 minutes - 48 hours)",
-		"   Check status: dig ${var.domain_name} NS",
+		"2. Wait for DNS propagation (5 min - 48 hours)",
+		"   Check: dig ${var.domain_name} NS",
 		"",
-		"3. Wait for ACM Certificate Validation (5-15 minutes)",
-		"   Certificate is automatically validated via DNS records",
-		"",
-		"4. Access Your Application:",
-		"   https://www.${var.domain_name}",
-		"   https://${var.domain_name}",
-		"",
-		"Note: ALB URL still works during transition:",
-		"https://${aws_lb.frontend.dns_name}",
-		"",
-		"========================================"
-	]) : "Custom domain not enabled. Set enable_custom_domain = true in terraform.tfvars"
-	description = "Step-by-step instructions for completing custom domain setup"
+		"3. Access: https://www.${var.domain_name}",
+		"   ALB fallback: https://${aws_lb.frontend.dns_name}"
+	]) : "Custom domain not enabled"
+	description = "Custom domain setup instructions"
 }

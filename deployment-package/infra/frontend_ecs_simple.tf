@@ -1,3 +1,5 @@
+# Frontend ECS service (SvelteKit web application)
+
 resource "aws_ecr_repository" "frontend" {
   name                 = "${var.project_name}-frontend-${var.environment}"
   image_tag_mutability = "MUTABLE"
@@ -286,28 +288,10 @@ output "frontend_service_name" {
 output "frontend_access_instructions" {
   description = "How to access the frontend application"
   value       = <<-EOT
+Application URL: https://${aws_lb.frontend.dns_name}
+ALB DNS: ${aws_lb.frontend.dns_name}
 
-  ========================================
-  Frontend Application Access
-  ========================================
-
-  Application URL: https://${aws_lb.frontend.dns_name}
-
-  Architecture:
-  - ALB (HTTPS with self-signed cert) → ECS Tasks (auto-healing)
-
-  Benefits:
-  ✓ HTTPS enabled (Cognito authentication works)
-  ✓ Self-signed certificate (suitable for internal/10-user deployment)
-  ✓ Stable load balancer (no 504 errors on task restarts)
-  ✓ Auto-healing (ALB health checks)
-  ✓ Cost-optimized ($32-62/month vs $40-72/month with CloudFront)
-
-  ALB DNS: ${aws_lb.frontend.dns_name}
-
-  Check ALB target health:
-  aws elbv2 describe-target-health --target-group-arn ${aws_lb_target_group.frontend.arn} --region ${var.aws_region}
-
-  ========================================
-  EOT
+Check target health:
+aws elbv2 describe-target-health --target-group-arn ${aws_lb_target_group.frontend.arn} --region ${var.aws_region}
+EOT
 }

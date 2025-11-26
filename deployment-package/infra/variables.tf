@@ -1,3 +1,5 @@
+# Input variables for MRA Mines infrastructure
+
 variable "aws_region" {
 	type        = string
 	description = "AWS region for all resources"

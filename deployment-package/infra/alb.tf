@@ -1,3 +1,5 @@
+# Application Load Balancer for frontend access
+
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg-${var.environment}"
   description = "Security group for Application Load Balancer"
