@@ -43,11 +43,6 @@ export enum AuditEventType {
 	RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED',
 	RATE_LIMIT_WARNING = 'RATE_LIMIT_WARNING', // e.g., 80% of limit reached
 
-	// Circuit breaker events
-	CIRCUIT_OPENED = 'CIRCUIT_OPENED',
-	CIRCUIT_HALF_OPEN = 'CIRCUIT_HALF_OPEN',
-	CIRCUIT_CLOSED = 'CIRCUIT_CLOSED',
-
 	// Security events
 	UNAUTHORIZED_ACCESS = 'UNAUTHORIZED_ACCESS',
 	FORBIDDEN_ACCESS = 'FORBIDDEN_ACCESS',
@@ -265,26 +260,6 @@ export const AuditLog = {
 			result: 'rejected',
 			metadata
 		}),
-
-	/** Log circuit breaker state change */
-	circuitStateChange: (serviceName: string, newState: string, metadata?: Record<string, any>) => {
-		const eventType =
-			newState === 'OPEN'
-				? AuditEventType.CIRCUIT_OPENED
-				: newState === 'HALF_OPEN'
-				? AuditEventType.CIRCUIT_HALF_OPEN
-				: AuditEventType.CIRCUIT_CLOSED;
-
-		const severity = newState === 'OPEN' ? AuditSeverity.ERROR : AuditSeverity.INFO;
-
-		logAuditEvent({
-			eventType,
-			severity,
-			action: `circuit_${serviceName.toLowerCase()}_${newState.toLowerCase()}`,
-			result: 'success',
-			metadata: { serviceName, newState, ...metadata }
-		});
-	},
 
 	/** Log service error */
 	serviceError: (

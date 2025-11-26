@@ -1,21 +1,4 @@
-/**
- * AWS X-Ray distributed tracing integration
- *
- * Provides distributed tracing capabilities to track requests across:
- * - Frontend API endpoints
- * - Lambda functions
- * - DynamoDB operations
- * - S3 operations
- * - ECS tasks
- *
- * Benefits:
- * - End-to-end request visibility
- * - Performance bottleneck identification
- * - Error tracking across service boundaries
- * - Service dependency mapping
- *
- * Note: Requires AWS X-Ray daemon running and proper IAM permissions
- */
+// AWS X-Ray tracing utilities
 
 import { env } from '$env/dynamic/private';
 
@@ -23,32 +6,16 @@ import { env } from '$env/dynamic/private';
 const XRAY_ENABLED = env.XRAY_ENABLED === 'true';
 
 export interface TraceSegment {
-	/** Unique trace ID */
 	traceId: string;
-	/** Segment ID for this operation */
 	segmentId: string;
-	/** Parent segment ID (if this is a subsegment) */
 	parentId?: string;
-	/** Operation name */
 	name: string;
-	/** Start time (epoch seconds) */
 	startTime: number;
-	/** End time (epoch seconds) */
 	endTime?: number;
-	/** HTTP request details */
 	http?: {
-		request?: {
-			url?: string;
-			method?: string;
-			userAgent?: string;
-			clientIp?: string;
-		};
-		response?: {
-			status?: number;
-			contentLength?: number;
-		};
+		request?: { url?: string; method?: string; userAgent?: string; clientIp?: string };
+		response?: { status?: number; contentLength?: number };
 	};
-	/** AWS service call details */
 	aws?: {
 		operation?: string;
 		region?: string;
@@ -57,24 +24,14 @@ export interface TraceSegment {
 		tableName?: string;
 		bucket?: string;
 	};
-	/** Error details if operation failed */
 	error?: boolean;
 	fault?: boolean;
-	cause?: {
-		message?: string;
-		stack?: string;
-		type?: string;
-	};
-	/** Custom metadata */
+	cause?: { message?: string; stack?: string; type?: string };
 	metadata?: Record<string, any>;
-	/** Custom annotations (indexed by X-Ray) */
 	annotations?: Record<string, string | number | boolean>;
 }
 
-/**
- * Generate a unique trace ID in X-Ray format
- * Format: 1-{hex timestamp}-{hex random}
- */
+// Generate X-Ray format trace ID: 1-{hex timestamp}-{hex random}
 export function generateTraceId(): string {
 	const timestamp = Math.floor(Date.now() / 1000).toString(16);
 	const random = Array.from({ length: 24 }, () =>
@@ -83,19 +40,13 @@ export function generateTraceId(): string {
 	return `1-${timestamp}-${random}`;
 }
 
-/**
- * Generate a segment ID
- */
 export function generateSegmentId(): string {
 	return Array.from({ length: 16 }, () =>
 		Math.floor(Math.random() * 16).toString(16)
 	).join('');
 }
 
-/**
- * Parse X-Ray trace header
- * Format: Root=1-5e645f3e-1234567890abcdef;Parent=abcdef1234567890;Sampled=1
- */
+// Parse X-Ray header: Root=...;Parent=...;Sampled=1
 export function parseTraceHeader(header: string | null): {
 	traceId?: string;
 	parentId?: string;
@@ -116,9 +67,6 @@ export function parseTraceHeader(header: string | null): {
 	return result;
 }
 
-/**
- * Create X-Ray trace header
- */
 export function createTraceHeader(traceId: string, parentId?: string, sampled = true): string {
 	let header = `Root=${traceId}`;
 	if (parentId) header += `;Parent=${parentId}`;
@@ -126,9 +74,6 @@ export function createTraceHeader(traceId: string, parentId?: string, sampled = 
 	return header;
 }
 
-/**
- * Start a new trace segment
- */
 export function startSegment(name: string, traceId?: string, parentId?: string): TraceSegment {
 	return {
 		traceId: traceId || generateTraceId(),
@@ -141,9 +86,6 @@ export function startSegment(name: string, traceId?: string, parentId?: string):
 	};
 }
 
-/**
- * End a trace segment
- */
 export function endSegment(segment: TraceSegment): TraceSegment {
 	return {
 		...segment,
@@ -151,9 +93,6 @@ export function endSegment(segment: TraceSegment): TraceSegment {
 	};
 }
 
-/**
- * Add HTTP request details to segment
- */
 export function addHttpRequest(
 	segment: TraceSegment,
 	request: {
@@ -172,9 +111,6 @@ export function addHttpRequest(
 	};
 }
 
-/**
- * Add HTTP response details to segment
- */
 export function addHttpResponse(
 	segment: TraceSegment,
 	response: {
@@ -193,9 +129,6 @@ export function addHttpResponse(
 	};
 }
 
-/**
- * Add AWS service call details to segment
- */
 export function addAwsCall(
 	segment: TraceSegment,
 	aws: {
@@ -216,9 +149,6 @@ export function addAwsCall(
 	};
 }
 
-/**
- * Add error details to segment
- */
 export function addError(
 	segment: TraceSegment,
 	error: Error | string,
@@ -238,9 +168,6 @@ export function addError(
 	};
 }
 
-/**
- * Add custom annotation (indexed by X-Ray for filtering)
- */
 export function addAnnotation(
 	segment: TraceSegment,
 	key: string,
@@ -255,9 +182,6 @@ export function addAnnotation(
 	};
 }
 
-/**
- * Add custom metadata (not indexed, for debugging)
- */
 export function addMetadata(
 	segment: TraceSegment,
 	key: string,
@@ -272,10 +196,6 @@ export function addMetadata(
 	};
 }
 
-/**
- * Send segment to X-Ray daemon
- * In production, this would send to the X-Ray daemon via UDP
- */
 export function sendSegment(segment: TraceSegment): void {
 	if (!XRAY_ENABLED) {
 		// When X-Ray is disabled, just log the segment for debugging
@@ -302,9 +222,6 @@ export function sendSegment(segment: TraceSegment): void {
 	});
 }
 
-/**
- * Trace a function execution
- */
 export async function trace<T>(
 	name: string,
 	fn: (segment: TraceSegment) => Promise<T>,
@@ -342,19 +259,9 @@ export async function trace<T>(
 	}
 }
 
-/**
- * Helper to enable X-Ray tracing for the application
- * Add to hooks.server.ts
- */
 export const XRayTracing = {
-	/**
-	 * Check if X-Ray is enabled
-	 */
 	isEnabled: () => XRAY_ENABLED,
 
-	/**
-	 * Trace an HTTP request
-	 */
 	traceRequest: async <T>(
 		name: string,
 		request: Request,
