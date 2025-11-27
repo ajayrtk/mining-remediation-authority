@@ -500,8 +500,8 @@
 <div class="layout">
 	<header class="top-bar">
 		<div class="brand">
-			<h1>MRA Mines Map</h1>
-			<p>Browse processed maps and download outputs fast.</p>
+			<h1>Mine plan digitiser</h1>
+			<p>Extract lines and text from georeferenced mine plans for GIS</p>
 		</div>
 		<div class="auth-actions">
 			{#if user}
