@@ -4,7 +4,7 @@
 import { parseMapFilename, sanitizeMapFilename } from '$lib/utils/filenameParser';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { QueryCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { json } from '@sveltejs/kit';
 import { MAPS_TABLE, dynamoDocClient } from '$lib/server/dynamo';
 import { MAP_INPUT_BUCKET, getS3Client } from '$lib/server/s3';
@@ -120,6 +120,58 @@ const checkMapExists = async (mapId: string): Promise<{
 		console.error(`[presigned-url] Failed to check if map ${mapId} exists`, error);
 		// If we can't check, err on the side of allowing upload
 		return { exists: false, canRetry: true };
+	}
+};
+
+// Reserve mapId atomically before generating presigned URL
+// Uses conditional write to prevent race conditions in multi-user scenarios
+// Only the first request wins - subsequent requests get rejected
+const reserveMapId = async (
+	mapId: string,
+	mapName: string,
+	submittedBy: string,
+	jobId: string
+): Promise<{
+	reserved: boolean;
+	existingName?: string;
+	reason?: string;
+}> => {
+	if (!MAPS_TABLE) {
+		return { reserved: true }; // Skip if no table configured
+	}
+
+	try {
+		await dynamoDocClient.send(
+			new PutCommand({
+				TableName: MAPS_TABLE,
+				Item: {
+					mapId: mapId,
+					mapName: mapName,
+					status: 'RESERVED',
+					submittedBy: submittedBy,
+					jobId: jobId,
+					createdAt: new Date().toISOString(),
+					reservedAt: new Date().toISOString()
+				},
+				// Only succeed if mapId doesn't exist OR status is FAILED (retry allowed)
+				ConditionExpression: 'attribute_not_exists(mapId) OR #status = :failed',
+				ExpressionAttributeNames: { '#status': 'status' },
+				ExpressionAttributeValues: { ':failed': 'FAILED' }
+			})
+		);
+		return { reserved: true };
+	} catch (error: any) {
+		if (error.name === 'ConditionalCheckFailedException') {
+			// Another request already reserved this mapId
+			// Fetch existing record to get details
+			const existing = await checkMapExists(mapId);
+			return {
+				reserved: false,
+				existingName: existing.existingName,
+				reason: existing.reason || 'Already being processed by another user'
+			};
+		}
+		throw error;
 	}
 };
 
@@ -302,9 +354,28 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			filesToUpload.push(validatedFile);
 		}
 
-		// Phase 4: Generate presigned URLs in parallel (all S3 operations at once)
+		// Phase 4: Reserve mapIds atomically and generate presigned URLs
+		// This prevents race conditions in multi-user scenarios
 		const presignedUrlResults = await Promise.all(
 			filesToUpload.map(async (vf) => {
+				// Step 1: Reserve the mapId atomically (prevents multi-user duplicates)
+				const reservation = await reserveMapId(
+					vf.mapId,
+					vf.mapName,
+					submittedBy,
+					jobId
+				);
+
+				if (!reservation.reserved) {
+					// Another user already reserved this mapId
+					let errorMsg = reservation.reason || 'Already being processed by another user';
+					if (reservation.existingName && reservation.existingName !== vf.file.name) {
+						errorMsg = `Same content as "${reservation.existingName}" - ${errorMsg}`;
+					}
+					return { error: errorMsg, fileName: vf.file.name };
+				}
+
+				// Step 2: Generate presigned URL (only if reservation succeeded)
 				const command = new PutObjectCommand({
 					Bucket: MAP_INPUT_BUCKET,
 					Key: vf.mapName,
@@ -325,7 +396,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			})
 		);
 
-		presignedUrls.push(...presignedUrlResults);
+		// Separate successful URLs from reservation failures
+		for (const result of presignedUrlResults) {
+			if ('error' in result) {
+				fileErrors.push({ fileName: result.fileName, error: result.error });
+			} else {
+				presignedUrls.push(result);
+			}
+		}
 
 		// Figure out what to return based on results
 		const hasErrors = fileErrors.length > 0;

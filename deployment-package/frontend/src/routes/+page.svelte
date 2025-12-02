@@ -296,6 +296,42 @@
 					uploadProgress = [...uploadProgress];
 				}
 			}
+
+			// Step 3: Client-side duplicate detection within the batch
+			const validFilesForDupeCheck = selectedFiles.filter((_, index) => {
+				const progress = uploadProgress.find(p => p.name === selectedFiles[index].name);
+				return progress && progress.status === 'valid';
+			});
+
+			if (validFilesForDupeCheck.length > 1) {
+				// Compute hashes for all valid files and detect duplicates
+				const fileHashes: Map<string, string[]> = new Map(); // hash -> [filenames]
+
+				for (const file of validFilesForDupeCheck) {
+					const hash = await calculateFileHash(file);
+					const existing = fileHashes.get(hash) || [];
+					existing.push(file.name);
+					fileHashes.set(hash, existing);
+				}
+
+				// Mark duplicates as invalid (keep only the first file with each hash)
+				for (const [, fileNames] of fileHashes) {
+					if (fileNames.length > 1) {
+						// Skip the first file (it's valid), mark the rest as duplicates
+						for (let i = 1; i < fileNames.length; i++) {
+							const progressIndex = uploadProgress.findIndex(p => p.name === fileNames[i]);
+							if (progressIndex !== -1) {
+								uploadProgress[progressIndex] = {
+									...uploadProgress[progressIndex],
+									status: 'invalid',
+									error: `Duplicate content: This file contains the same image as "${fileNames[0]}"`
+								};
+							}
+						}
+					}
+				}
+				uploadProgress = [...uploadProgress];
+			}
 		} catch (error) {
 			console.error('Validation error:', error);
 			const errorMessage = error instanceof Error
@@ -335,7 +371,37 @@
 	};
 
 	// Calculate SHA-256 hash of file for deduplication
+	// For ZIP files, hash the image content inside, not the ZIP itself
 	const calculateFileHash = async (file: File): Promise<string> => {
+		// For ZIP files, extract and hash the image content inside
+		if (file.name.toLowerCase().endsWith('.zip')) {
+			const JSZip = (await import('jszip')).default;
+			const zip = await JSZip.loadAsync(file);
+
+			// Find the image file inside the ZIP
+			let imageContent: ArrayBuffer | null = null;
+			for (const [path, zipEntry] of Object.entries(zip.files)) {
+				if (zipEntry.dir) continue;
+				const fileName = path.split('/').pop() || path;
+				if (fileName.startsWith('.')) continue;
+
+				const lower = fileName.toLowerCase();
+				if (lower.endsWith('.jpg') || lower.endsWith('.jpeg') ||
+					lower.endsWith('.tif') || lower.endsWith('.tiff')) {
+					imageContent = await zipEntry.async('arraybuffer');
+					break; // Use first image found
+				}
+			}
+
+			if (imageContent) {
+				const hashBuffer = await crypto.subtle.digest('SHA-256', imageContent);
+				const hashArray = Array.from(new Uint8Array(hashBuffer));
+				const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+				return hashHex.substring(0, 12);
+			}
+		}
+
+		// Fallback: hash the entire file
 		const buffer = await file.arrayBuffer();
 		const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
 		const hashArray = Array.from(new Uint8Array(hashBuffer));
