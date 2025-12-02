@@ -1392,18 +1392,6 @@
 		pointer-events: none;
 	}
 
-	.hero-content {
-		position: relative;
-		z-index: 1;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		text-align: center;
-		gap: 1.5rem;
-		max-width: 700px;
-		margin: 0 auto;
-	}
-
 	.hero-icon {
 		display: flex;
 		align-items: center;
@@ -1414,28 +1402,6 @@
 		background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
 		color: white;
 		box-shadow: var(--shadow-floating);
-	}
-
-	.hero-content h2 {
-		margin: 0;
-		font-size: 2.5rem;
-		font-weight: 800;
-		color: var(--text-primary);
-		line-height: 1.2;
-	}
-
-	.hero-subtitle {
-		margin: 0;
-		font-size: 1.15rem;
-		color: var(--text-secondary);
-		line-height: 1.6;
-		max-width: 600px;
-	}
-
-	.button.large {
-		padding: 0.9rem 2rem;
-		font-size: 1.05rem;
-		gap: 0.6rem;
 	}
 
 	.workflow-steps {
@@ -2134,14 +2100,6 @@
 		.hero-landing {
 			padding: 2.5rem 1.5rem;
 			gap: 2.5rem;
-		}
-
-		.hero-content h2 {
-			font-size: 2rem;
-		}
-
-		.hero-subtitle {
-			font-size: 1rem;
 		}
 
 		.hero-icon {

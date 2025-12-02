@@ -1,44 +1,12 @@
 // Audit logging for security-relevant operations
 
 export enum AuditEventType {
-	// Authentication events
-	AUTH_SUCCESS = 'AUTH_SUCCESS',
-	AUTH_FAILURE = 'AUTH_FAILURE',
-	AUTH_LOGOUT = 'AUTH_LOGOUT',
-
-	// Upload events
-	UPLOAD_INITIATED = 'UPLOAD_INITIATED',
-	UPLOAD_SUCCESS = 'UPLOAD_SUCCESS',
-	UPLOAD_FAILURE = 'UPLOAD_FAILURE',
-	UPLOAD_REJECTED = 'UPLOAD_REJECTED', // Rate limit, validation, etc.
-
-	// Download events
-	DOWNLOAD_INITIATED = 'DOWNLOAD_INITIATED',
-	DOWNLOAD_SUCCESS = 'DOWNLOAD_SUCCESS',
-	DOWNLOAD_FAILURE = 'DOWNLOAD_FAILURE',
-
 	// Delete events
-	DELETE_INITIATED = 'DELETE_INITIATED',
 	DELETE_SUCCESS = 'DELETE_SUCCESS',
-	DELETE_FAILURE = 'DELETE_FAILURE',
-
-	// Retry events
-	RETRY_INITIATED = 'RETRY_INITIATED',
-	RETRY_SUCCESS = 'RETRY_SUCCESS',
-	RETRY_FAILURE = 'RETRY_FAILURE',
-
-	// Rate limiting events
-	RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED',
-	RATE_LIMIT_WARNING = 'RATE_LIMIT_WARNING', // e.g., 80% of limit reached
 
 	// Security events
 	UNAUTHORIZED_ACCESS = 'UNAUTHORIZED_ACCESS',
-	FORBIDDEN_ACCESS = 'FORBIDDEN_ACCESS',
-	SUSPICIOUS_ACTIVITY = 'SUSPICIOUS_ACTIVITY',
-
-	// System events
-	SERVICE_ERROR = 'SERVICE_ERROR',
-	SERVICE_DEGRADED = 'SERVICE_DEGRADED'
+	FORBIDDEN_ACCESS = 'FORBIDDEN_ACCESS'
 }
 
 export enum AuditSeverity {
@@ -105,74 +73,6 @@ export function logAuditEvent(entry: Omit<AuditLogEntry, 'timestamp'>): void {
 }
 
 export const AuditLog = {
-	uploadSuccess: (userId: string, resourceId: string, metadata?: Record<string, any>) =>
-		logAuditEvent({
-			eventType: AuditEventType.UPLOAD_SUCCESS,
-			severity: AuditSeverity.INFO,
-			userId,
-			resourceId,
-			resourceType: 'map',
-			action: 'upload',
-			result: 'success',
-			metadata
-		}),
-
-	uploadFailure: (
-		userId: string,
-		errorMessage: string,
-		metadata?: Record<string, any>,
-		correlationId?: string
-	) =>
-		logAuditEvent({
-			eventType: AuditEventType.UPLOAD_FAILURE,
-			severity: AuditSeverity.ERROR,
-			userId,
-			action: 'upload',
-			result: 'failure',
-			errorMessage,
-			metadata,
-			correlationId
-		}),
-
-	uploadRejected: (
-		userId: string,
-		reason: string,
-		metadata?: Record<string, any>,
-		correlationId?: string
-	) =>
-		logAuditEvent({
-			eventType: AuditEventType.UPLOAD_REJECTED,
-			severity: AuditSeverity.WARNING,
-			userId,
-			action: 'upload',
-			result: 'rejected',
-			errorMessage: reason,
-			metadata,
-			correlationId
-		}),
-
-	rateLimitExceeded: (userId: string, endpoint: string, metadata?: Record<string, any>) =>
-		logAuditEvent({
-			eventType: AuditEventType.RATE_LIMIT_EXCEEDED,
-			severity: AuditSeverity.WARNING,
-			userId,
-			action: `rate_limit_${endpoint}`,
-			result: 'rejected',
-			metadata
-		}),
-
-	downloadSuccess: (userId: string, resourceId: string, metadata?: Record<string, any>) =>
-		logAuditEvent({
-			eventType: AuditEventType.DOWNLOAD_SUCCESS,
-			severity: AuditSeverity.INFO,
-			userId,
-			resourceId,
-			resourceType: 'map',
-			action: 'download',
-			result: 'success',
-			metadata
-		}),
-
 	deleteSuccess: (userId: string, resourceId: string, metadata?: Record<string, any>) =>
 		logAuditEvent({
 			eventType: AuditEventType.DELETE_SUCCESS,
@@ -181,18 +81,6 @@ export const AuditLog = {
 			resourceId,
 			resourceType: 'map',
 			action: 'delete',
-			result: 'success',
-			metadata
-		}),
-
-	retryInitiated: (userId: string, resourceId: string, metadata?: Record<string, any>) =>
-		logAuditEvent({
-			eventType: AuditEventType.RETRY_INITIATED,
-			severity: AuditSeverity.INFO,
-			userId,
-			resourceId,
-			resourceType: 'map',
-			action: 'retry',
 			result: 'success',
 			metadata
 		}),
@@ -226,22 +114,6 @@ export const AuditLog = {
 			resourceId,
 			action,
 			result: 'rejected',
-			metadata
-		}),
-
-	serviceError: (
-		serviceName: string,
-		errorMessage: string,
-		correlationId?: string,
-		metadata?: Record<string, any>
-	) =>
-		logAuditEvent({
-			eventType: AuditEventType.SERVICE_ERROR,
-			severity: AuditSeverity.ERROR,
-			action: `${serviceName}_error`,
-			result: 'failure',
-			errorMessage,
-			correlationId,
 			metadata
 		}),
 

@@ -203,17 +203,6 @@ export function sendSegment(segment: TraceSegment): void {
 		return;
 	}
 
-	// In production, send to X-Ray daemon:
-	// const dgram = require('dgram');
-	// const socket = dgram.createSocket('udp4');
-	// const message = JSON.stringify({
-	//   format: 'json',
-	//   version: 1,
-	//   trace_id: segment.traceId,
-	//   ...segment
-	// });
-	// socket.send(message, 0, message.length, 2000, '127.0.0.1');
-
 	console.log('[xray] Trace segment sent:', {
 		traceId: segment.traceId,
 		segmentId: segment.segmentId,

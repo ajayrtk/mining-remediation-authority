@@ -8,12 +8,8 @@ export type ValidationResult = {
 	error?: string;
 	warnings?: string[];
 	imagesFound?: string[];
-	imageTypes?: ('jpg' | 'tif')[];
-	allFilesFound?: string[];
 	seamId?: string;
 	sheetNumber?: string;
-	worldFilesFound?: string[];
-	missingWorldFiles?: string[];
 };
 
 
@@ -126,7 +122,6 @@ export async function validateZipFile(file: File): Promise<ValidationResult> {
 
 		// Validation: Check world file requirements based on image type
 		const missingWorldFiles: string[] = [];
-		result.worldFilesFound = worldFiles;
 
 		for (const image of validImages) {
 			const imageFileName = image.name.split('/').pop() || image.name;
@@ -148,7 +143,6 @@ export async function validateZipFile(file: File): Promise<ValidationResult> {
 
 		if (missingWorldFiles.length > 0) {
 			result.error = `Missing required world files for JPEG images: ${missingWorldFiles.join(', ')}. Each JPEG/JPG image must have a corresponding .jgw or .jgwx world file for georeferencing.`;
-			result.missingWorldFiles = missingWorldFiles;
 			return result;
 		}
 
@@ -172,8 +166,6 @@ export async function validateZipFile(file: File): Promise<ValidationResult> {
 		// Success - all validations passed
 		result.valid = true;
 		result.imagesFound = validImages.map(img => img.name);
-		result.imageTypes = validImages.map(img => img.type);
-		result.allFilesFound = allFiles;
 
 		return result;
 
@@ -189,18 +181,4 @@ export async function validateZipFiles(files: File[]): Promise<ValidationResult[
 
 export function allValid(results: ValidationResult[]): boolean {
 	return results.every(r => r.valid);
-}
-
-export function getValidationSummary(results: ValidationResult[]): {
-	total: number;
-	valid: number;
-	invalid: number;
-	errors: string[];
-} {
-	return {
-		total: results.length,
-		valid: results.filter(r => r.valid).length,
-		invalid: results.filter(r => !r.valid).length,
-		errors: results.filter(r => !r.valid).map(r => `${r.fileName}: ${r.error}`).slice(0, 5)
-	};
 }
