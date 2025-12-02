@@ -500,7 +500,7 @@
 <div class="layout">
 	<header class="top-bar">
 		<div class="brand">
-			<h1>Mine plan digitiser</h1>
+			<h1>Mine Plan Digitiser</h1>
 			<p>Extract lines and text from georeferenced mine plans for GIS</p>
 		</div>
 		<div class="auth-actions">

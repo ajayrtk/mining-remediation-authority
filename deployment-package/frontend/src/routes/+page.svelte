@@ -657,7 +657,7 @@
 <div class="layout">
 	<header class="top-bar">
 		<div class="brand">
-			<h1>Mine plan digitiser</h1>
+			<h1>Mine Plan Digitiser</h1>
 			<p>Extract lines and text from georeferenced mine plans for GIS</p>
 		</div>
 		<div class="auth-actions">
@@ -734,29 +734,15 @@
 		</section>
 	{:else}
 		<section class="hero-landing">
-			<div class="hero-content">
-				<div class="hero-icon">
-					<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-						<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-						<polyline points="7.5 4.21 12 6.81 16.5 4.21"></polyline>
-						<polyline points="7.5 19.79 7.5 14.6 3 12"></polyline>
-						<polyline points="21 12 16.5 14.6 16.5 19.79"></polyline>
-						<polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-						<line x1="12" y1="22.08" x2="12" y2="12"></line>
-					</svg>
-				</div>
-				<h2>Transform Your Mining Maps</h2>
-				<p class="hero-subtitle">
-					Upload georeferenced maps. Get processed results instantly.
-				</p>
-				<a class="button primary large" href="/auth/login">
-					<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
-						<polyline points="10 17 15 12 10 7"></polyline>
-						<line x1="15" y1="12" x2="3" y2="12"></line>
-					</svg>
-					Sign in to Get Started
-				</a>
+			<div class="hero-icon">
+				<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+					<polyline points="7.5 4.21 12 6.81 16.5 4.21"></polyline>
+					<polyline points="7.5 19.79 7.5 14.6 3 12"></polyline>
+					<polyline points="21 12 16.5 14.6 16.5 19.79"></polyline>
+					<polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+					<line x1="12" y1="22.08" x2="12" y2="12"></line>
+				</svg>
 			</div>
 
 			<div class="workflow-steps">
@@ -1384,6 +1370,7 @@
 	.hero-landing {
 		display: flex;
 		flex-direction: column;
+		align-items: center;
 		gap: 3rem;
 		padding: 3rem 2rem;
 		border-radius: 1.3rem;
@@ -1943,6 +1930,18 @@
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		color: var(--text-secondary);
+	}
+
+	/* Align Status column header and content to center */
+	th:nth-child(3),
+	td:nth-child(3) {
+		text-align: center;
+	}
+
+	/* Align Created column - keep left aligned */
+	th:nth-child(4),
+	td:nth-child(4) {
+		text-align: left;
 	}
 
 	td {
