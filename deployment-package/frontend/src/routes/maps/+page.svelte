@@ -548,54 +548,74 @@
 					{/if}
 				</div>
 			{:else}
-				<a class="button ghost" href="/">Dashboard</a>
 				<a class="button primary" href="/auth/login">Sign in</a>
-				<ThemeToggle variant="inline" />
 			{/if}
 		</div>
 	</header>
 
 	{#if !user}
-		<section class="panel sign-in-panel">
-			<div class="sign-in-content">
-				<div class="sign-in-icon">
-					<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-						<path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"></path>
-						<path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z"></path>
+		<section class="hero-landing">
+			<div class="hero-icon">
+				<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+					<polyline points="7.5 4.21 12 6.81 16.5 4.21"></polyline>
+					<polyline points="7.5 19.79 7.5 14.6 3 12"></polyline>
+					<polyline points="21 12 16.5 14.6 16.5 19.79"></polyline>
+					<polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+					<line x1="12" y1="22.08" x2="12" y2="12"></line>
+				</svg>
+			</div>
+
+			<div class="workflow-steps">
+				<div class="workflow-step">
+					<div class="step-number">1</div>
+					<div class="step-icon">
+						<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+							<polyline points="17 8 12 3 7 8"></polyline>
+							<line x1="12" y1="3" x2="12" y2="15"></line>
+						</svg>
+					</div>
+					<h3>Upload</h3>
+					<p>ZIP files</p>
+				</div>
+
+				<div class="workflow-arrow">
+					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<polyline points="9 18 15 12 9 6"></polyline>
 					</svg>
 				</div>
-				<h2>Access Your Maps</h2>
-				<p class="sign-in-description">Sign in to view, download, and manage your processed mining maps.</p>
 
-				<ul class="sign-in-features">
-					<li>
-						<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<polyline points="20 6 9 17 4 12"></polyline>
+				<div class="workflow-step">
+					<div class="step-number">2</div>
+					<div class="step-icon">
+						<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<circle cx="12" cy="12" r="3"></circle>
+							<path d="M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6M4.22 19.78l4.24-4.24M15.54 8.46l4.24-4.24"></path>
 						</svg>
-						<span>View all your processed maps</span>
-					</li>
-					<li>
-						<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<polyline points="20 6 9 17 4 12"></polyline>
-						</svg>
-						<span>Download results instantly</span>
-					</li>
-					<li>
-						<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<polyline points="20 6 9 17 4 12"></polyline>
-						</svg>
-						<span>Track processing status in real-time</span>
-					</li>
-				</ul>
+					</div>
+					<h3>Process</h3>
+					<p>Automated</p>
+				</div>
 
-				<a class="button primary sign-in-button" href="/auth/login">
-					<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
-						<polyline points="10 17 15 12 10 7"></polyline>
-						<line x1="15" y1="12" x2="3" y2="12"></line>
+				<div class="workflow-arrow">
+					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<polyline points="9 18 15 12 9 6"></polyline>
 					</svg>
-					Sign in to Continue
-				</a>
+				</div>
+
+				<div class="workflow-step">
+					<div class="step-number">3</div>
+					<div class="step-icon">
+						<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+							<polyline points="7 10 12 15 17 10"></polyline>
+							<line x1="12" y1="15" x2="12" y2="3"></line>
+						</svg>
+					</div>
+					<h3>Download</h3>
+					<p>Results</p>
+				</div>
 			</div>
 		</section>
 	{:else}
@@ -1242,72 +1262,124 @@
 		backdrop-filter: blur(12px);
 	}
 
-	.sign-in-panel {
-		align-items: center;
-		justify-content: center;
-		min-height: 500px;
-		text-align: center;
-	}
-
-	.sign-in-content {
-		max-width: 480px;
+	/* Landing Page Workflow Styles */
+	.hero-landing {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 1.5rem;
+		gap: 3rem;
+		padding: 3rem 2rem;
+		border-radius: 1.3rem;
+		background: var(--hero-background);
+		border: 1px solid var(--hero-border);
+		box-shadow: var(--hero-shadow);
+		backdrop-filter: blur(10px);
+		position: relative;
+		overflow: hidden;
 	}
 
-	.sign-in-icon {
-		width: 80px;
-		height: 80px;
+	.hero-landing::after {
+		content: '';
+		position: absolute;
+		inset: -40% 45% auto -20%;
+		height: 280px;
 		border-radius: 50%;
-		background: linear-gradient(135deg, rgba(124, 58, 237, 0.1), rgba(167, 139, 250, 0.1));
+		background: radial-gradient(circle, rgba(124, 58, 237, 0.2), transparent 65%);
+		pointer-events: none;
+	}
+
+	.hero-icon {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		margin-bottom: 0.5rem;
+		width: 100px;
+		height: 100px;
+		border-radius: 1.5rem;
+		background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+		color: white;
+		box-shadow: var(--shadow-floating);
 	}
 
-	.sign-in-icon svg {
-		color: var(--accent-primary);
+	.workflow-steps {
+		position: relative;
+		z-index: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 1.5rem;
+		flex-wrap: wrap;
 	}
 
-	.sign-in-content h2 {
+	.workflow-step {
+		background: var(--panel-background);
+		border: 1px solid rgba(124, 58, 237, 0.4);
+		border-radius: 1rem;
+		padding: 1.5rem;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.75rem;
+		box-shadow: var(--shadow-elevated);
+		backdrop-filter: blur(12px);
+		transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+		min-width: 160px;
+		position: relative;
+	}
+
+	.workflow-step:hover {
+		transform: translateY(-4px);
+		box-shadow: var(--shadow-floating);
+		border-color: rgba(124, 58, 237, 0.7);
+	}
+
+	.step-number {
+		position: absolute;
+		top: -12px;
+		right: -12px;
+		width: 32px;
+		height: 32px;
+		border-radius: 50%;
+		background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+		color: white;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-weight: 700;
+		font-size: 0.9rem;
+		box-shadow: var(--shadow-floating);
+	}
+
+	.step-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 64px;
+		height: 64px;
+		border-radius: 0.85rem;
+		background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+		color: white;
+		box-shadow: var(--shadow-floating);
+	}
+
+	.workflow-step h3 {
 		margin: 0;
-		font-size: 2rem;
+		font-size: 1.15rem;
 		font-weight: 700;
 		color: var(--text-primary);
 	}
 
-	.sign-in-description {
-		font-size: 1.05rem;
-		color: var(--text-secondary);
-		line-height: 1.6;
+	.workflow-step p {
 		margin: 0;
+		color: var(--text-secondary);
+		font-size: 0.85rem;
+		text-align: center;
 	}
 
-	.sign-in-features {
-		list-style: none;
-		padding: 0;
-		margin: 1rem 0;
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-		text-align: left;
-		width: 100%;
-	}
-
-	.sign-in-features li {
+	.workflow-arrow {
+		color: var(--text-secondary);
+		opacity: 0.5;
 		display: flex;
 		align-items: center;
-		gap: 0.75rem;
-		color: var(--text-secondary);
-		font-size: 0.95rem;
-	}
-
-	.sign-in-features li svg {
-		color: var(--accent-primary);
-		flex-shrink: 0;
 	}
 
 	.sign-in-button {
@@ -1318,6 +1390,8 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.5rem;
+		position: relative;
+		z-index: 1;
 	}
 
 	.sign-in-button svg {
@@ -1789,6 +1863,30 @@
 
 		.hero {
 			padding: 2rem;
+		}
+
+		.hero-landing {
+			padding: 2.5rem 1.5rem;
+			gap: 2.5rem;
+		}
+
+		.hero-icon {
+			width: 80px;
+			height: 80px;
+		}
+
+		.hero-icon svg {
+			width: 48px;
+			height: 48px;
+		}
+
+		.workflow-steps {
+			flex-direction: column;
+			gap: 1rem;
+		}
+
+		.workflow-arrow {
+			transform: rotate(90deg);
 		}
 
 		.hero-stats {

@@ -1416,7 +1416,7 @@
 
 	.workflow-step {
 		background: var(--panel-background);
-		border: 1px solid var(--panel-border);
+		border: 1px solid rgba(124, 58, 237, 0.4);
 		border-radius: 1rem;
 		padding: 1.5rem;
 		display: flex;
@@ -1425,7 +1425,7 @@
 		gap: 0.75rem;
 		box-shadow: var(--shadow-elevated);
 		backdrop-filter: blur(12px);
-		transition: transform 0.3s ease, box-shadow 0.3s ease;
+		transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
 		min-width: 160px;
 		position: relative;
 	}
@@ -1433,6 +1433,7 @@
 	.workflow-step:hover {
 		transform: translateY(-4px);
 		box-shadow: var(--shadow-floating);
+		border-color: rgba(124, 58, 237, 0.7);
 	}
 
 	.step-number {
@@ -1459,8 +1460,9 @@
 		width: 64px;
 		height: 64px;
 		border-radius: 0.85rem;
-		background: linear-gradient(135deg, rgba(124, 58, 237, 0.15), rgba(79, 70, 229, 0.15));
-		color: var(--accent-primary);
+		background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+		color: white;
+		box-shadow: var(--shadow-floating);
 	}
 
 	.workflow-step h3 {
