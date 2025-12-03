@@ -149,6 +149,8 @@ const reserveMapId = async (
 					mapName: mapName,
 					status: 'RESERVED',
 					submittedBy: submittedBy,
+					ownerEmail: submittedBy,
+					userId: submittedBy,
 					jobId: jobId,
 					createdAt: new Date().toISOString(),
 					reservedAt: new Date().toISOString()
