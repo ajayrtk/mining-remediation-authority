@@ -880,9 +880,6 @@
 												{:else}
 													<p class="timing-empty">Timing data not yet available. Metrics are captured after processing begins.</p>
 												{/if}
-												{#if map.taskArn}
-													<p class="task-arn">Task: {map.taskArn.split('/').pop()}</p>
-												{/if}
 											</div>
 										</td>
 									</tr>
