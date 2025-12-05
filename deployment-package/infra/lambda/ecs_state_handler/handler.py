@@ -106,6 +106,49 @@ def update_map_timing(map_id: str, map_name: str, field_name: str, timestamp: st
         return False
 
 
+def mark_map_as_failed(map_id: str, map_name: str, error_message: str, timestamp: str) -> bool:
+    """Mark a map as FAILED when task terminates abnormally."""
+    if not MAPS_TABLE_NAME:
+        logger.warning("MAPS_TABLE_NAME not configured")
+        return False
+
+    try:
+        dynamo.update_item(
+            TableName=MAPS_TABLE_NAME,
+            Key={
+                "mapId": {"S": map_id},
+                "mapName": {"S": map_name}
+            },
+            UpdateExpression="SET #status = :status, #error = :error, updatedAt = :updated",
+            ExpressionAttributeNames={
+                "#status": "status",
+                "#error": "error"
+            },
+            ExpressionAttributeValues={
+                ":status": {"S": "FAILED"},
+                ":error": {"S": error_message},
+                ":updated": {"S": timestamp},
+                ":completed": {"S": "COMPLETED"},
+                ":failed": {"S": "FAILED"}
+            },
+            # Only update if status is not already COMPLETED or FAILED
+            ConditionExpression="attribute_not_exists(#status) OR (#status <> :completed AND #status <> :failed)"
+        )
+        logger.info(f"Marked map {map_id}/{map_name} as FAILED: {error_message}")
+        return True
+
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            logger.info(f"Map {map_id}/{map_name} already has final status, skipping FAILED update")
+            return True
+        logger.exception(f"Failed to mark map as FAILED", extra={
+            "map_id": map_id,
+            "map_name": map_name,
+            "error": str(exc)
+        })
+        return False
+
+
 def lambda_handler(event, _context):
     """Main Lambda handler - triggered by EventBridge ECS task state changes."""
     logger.info(f"Received ECS state change event: {json.dumps(event)}")
@@ -152,15 +195,46 @@ def lambda_handler(event, _context):
         # Also capture stop reason if available
         update_map_timing(map_id, map_name, "taskStoppedAt", timestamp, task_arn)
 
-        # Check if task failed
+        # Check if task failed abnormally
         stop_code = detail.get("stopCode")
-        stopped_reason = detail.get("stoppedReason")
+        stopped_reason = detail.get("stoppedReason", "")
 
-        if stop_code and stop_code != "EssentialContainerExited" or \
-           (stopped_reason and "error" in stopped_reason.lower()):
+        # Get container exit code
+        containers = detail.get("containers", [])
+        exit_code = None
+        if containers:
+            exit_code = containers[0].get("exitCode")
+
+        # Determine if this is an abnormal termination that should mark the map as FAILED
+        # Cases to handle:
+        # 1. TERMINATION stop reason (manual stop or cleanup)
+        # 2. Non-zero exit code (137 = SIGKILL, 1 = error, etc.)
+        # 3. Other error conditions
+        should_mark_failed = False
+        error_message = None
+
+        if stopped_reason == "TERMINATION":
+            should_mark_failed = True
+            error_message = f"Task was terminated (exit code: {exit_code})"
+            logger.warning(f"Task {task_arn} was terminated with exit code {exit_code}")
+        elif exit_code is not None and exit_code != 0:
+            should_mark_failed = True
+            if exit_code == 137:
+                error_message = "Task was killed (SIGKILL/OOM) - exit code 137"
+            elif exit_code == 143:
+                error_message = "Task was terminated (SIGTERM) - exit code 143"
+            else:
+                error_message = f"Task failed with exit code {exit_code}"
+            logger.warning(f"Task {task_arn} exited with code {exit_code}: {stopped_reason}")
+        elif stop_code and stop_code not in ("EssentialContainerExited",) or \
+             (stopped_reason and "error" in stopped_reason.lower()):
+            should_mark_failed = True
+            error_message = f"Task stopped: {stop_code} - {stopped_reason}"
             logger.warning(f"Task {task_arn} stopped with error: {stop_code} - {stopped_reason}")
-            # Note: The output_handler Lambda handles status updates to COMPLETED/FAILED
-            # This Lambda only captures timing metrics
+
+        if should_mark_failed and error_message:
+            # Mark the map as FAILED since the webhook won't be called
+            mark_map_as_failed(map_id, map_name, error_message, timestamp)
 
         logger.info(f"Captured taskStoppedAt for map {map_id}/{map_name}")
 
