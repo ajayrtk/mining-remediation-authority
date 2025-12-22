@@ -981,7 +981,12 @@
 										<td>
 											{#if job.batchSize}
 												<strong>{job.batchSize} file{job.batchSize > 1 ? 's' : ''}</strong>
-												<div class="meta">Processed: {job.processedCount ?? 0}/{job.batchSize}</div>
+												<div class="meta">
+												Processed: {Math.min(job.processedCount ?? 0, job.batchSize)}/{job.batchSize}
+												{#if (job.processedCount ?? 0) > job.batchSize}
+													<span class="warning-badge" title="Data inconsistency detected">⚠️</span>
+												{/if}
+											</div>
 											{:else}
 												<span class="meta">—</span>
 											{/if}
@@ -1947,6 +1952,13 @@
 	.meta {
 		font-size: 0.82rem;
 		color: var(--text-tertiary);
+	}
+
+	.warning-badge {
+		color: #f59e0b;
+		font-size: 0.9em;
+		margin-left: 4px;
+		cursor: help;
 	}
 
 	.status-badge {

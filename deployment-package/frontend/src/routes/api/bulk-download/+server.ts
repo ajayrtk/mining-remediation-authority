@@ -45,7 +45,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			});
 		}
 
-		// Validate all maps have required fields and verify ownership
+		// Validate all maps have required fields and verify existence
 		for (const map of maps) {
 			if (!map.bucket || !map.key || !map.mapName || !map.mapId) {
 				return ApiErrors.badRequest('Invalid map data', {
@@ -54,7 +54,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				});
 			}
 
-			// Verify ownership by querying DynamoDB
+			// Verify map exists by querying DynamoDB
 			try {
 				const result = await dynamoDocClient.send(
 					new GetCommand({
@@ -70,15 +70,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					});
 				}
 
-				if (result.Item.ownerEmail !== locals.user.email) {
-					return ApiErrors.forbidden('You can only download your own maps', {
-						correlationId,
-						details: `Attempted to download map: ${map.mapName}`
-					});
-				}
 			} catch (dbError) {
-				console.error('[bulk-download] Ownership verification failed:', dbError);
-				return ApiErrors.internalError('Failed to verify map ownership', {
+				console.error('[bulk-download] Map verification failed:', dbError);
+				return ApiErrors.internalError('Failed to verify map existence', {
 					correlationId,
 					details: dbError instanceof Error ? dbError.message : 'Database error'
 				});

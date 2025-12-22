@@ -430,7 +430,7 @@
 
 	// Delete map function
 	const deleteMap = async (map: MapEntry) => {
-		if (!confirm(`⚠️ Are you sure you want to delete Map?\n\nThis will permanently delete this map and all its processed data.\nThis action cannot be undone.`)) {
+		if (!confirm(`Are you sure you want to delete this output?\n\nThe input and output data will be permanently deleted and this action cannot be undone.`)) {
 			return;
 		}
 

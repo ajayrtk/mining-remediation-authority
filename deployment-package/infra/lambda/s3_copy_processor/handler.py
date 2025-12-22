@@ -22,19 +22,30 @@ def iso_timestamp() -> str:
     return datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
 
 
-def increment_processed_count(job_id: str) -> dict:
-    if not TABLE_NAME or not job_id:
+def increment_processed_count(job_id: str, map_id: str, map_name: str) -> dict:
+    """
+    Increment processed count only if this specific map hasn't been counted yet.
+    Uses a StringSet to track which maps have been counted for idempotency.
+    """
+    if not TABLE_NAME or not job_id or not map_id:
+        logger.warning(f"Missing required parameters: TABLE_NAME={bool(TABLE_NAME)}, job_id={bool(job_id)}, map_id={bool(map_id)}")
         return {}
+
+    # Unique identifier for this map
+    map_identifier = f"{map_id}#{map_name}"
 
     try:
         response = dynamo.update_item(
             TableName=TABLE_NAME,
             Key={"jobId": {"S": job_id}},
-            UpdateExpression="SET processedCount = if_not_exists(processedCount, :zero) + :inc, updatedAt = :updated",
+            UpdateExpression="SET processedCount = if_not_exists(processedCount, :zero) + :inc, updatedAt = :updated ADD processedMaps :map_set",
+            ConditionExpression="attribute_not_exists(processedMaps) OR NOT contains(processedMaps, :map_id)",
             ExpressionAttributeValues={
                 ":inc": {"N": "1"},
                 ":zero": {"N": "0"},
-                ":updated": {"S": iso_timestamp()}
+                ":updated": {"S": iso_timestamp()},
+                ":map_set": {"SS": [map_identifier]},
+                ":map_id": {"S": map_identifier}
             },
             ReturnValues="ALL_NEW"
         )
@@ -43,7 +54,7 @@ def increment_processed_count(job_id: str) -> dict:
         processed = int(attrs.get("processedCount", {}).get("N", "0"))
         batch_size = int(attrs.get("batchSize", {}).get("N", "0"))
 
-        logger.info(f"Job {job_id}: processed {processed}/{batch_size} maps")
+        logger.info(f"Job {job_id}: processed {processed}/{batch_size} maps (added {map_identifier})")
 
         # Check if all maps are processed (only if batchSize is known)
         if batch_size > 0 and processed >= batch_size:
@@ -61,8 +72,23 @@ def increment_processed_count(job_id: str) -> dict:
 
         return {"processed": processed, "batchSize": batch_size}
     except ClientError as e:
-        logger.error(f"Failed to increment processed count: {e}")
-        return {}
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            logger.warning(f"Map {map_identifier} already counted for job {job_id} - skipping increment (idempotency)")
+            # Return current job state without incrementing
+            try:
+                response = dynamo.get_item(
+                    TableName=TABLE_NAME,
+                    Key={"jobId": {"S": job_id}}
+                )
+                attrs = response.get("Item", {})
+                processed = int(attrs.get("processedCount", {}).get("N", "0"))
+                batch_size = int(attrs.get("batchSize", {}).get("N", "0"))
+                return {"processed": processed, "batchSize": batch_size}
+            except ClientError:
+                return {}
+        else:
+            logger.error(f"Failed to increment processed count for job {job_id}: {e}")
+            return {}
 
 
 def update_map_output(map_id: str, map_name: str, output_bucket: str, output_key: str) -> None:
@@ -207,7 +233,7 @@ def lambda_handler(event, _context):
         update_map_output(map_id, map_name, OUTPUT_BUCKET, output_key)
 
         # Increment processed count (will auto-complete job if all maps done)
-        increment_processed_count(job_id)
+        increment_processed_count(job_id, map_id, map_name)
 
         return {
             "statusCode": 200,
