@@ -26,7 +26,7 @@
 	let bulkDownloading = false;
 
 	// Sort state
-	let sortColumn: 'mapName' | 'ownerEmail' | 'outputSizeBytes' | 'createdAt' | 'jobStatus' = 'createdAt';
+	let sortColumn: 'mapName' | 'ownerEmail' | 'ownerUser' | 'outputSizeBytes' | 'createdAt' | 'jobStatus' = 'createdAt';
 	let sortDirection: 'asc' | 'desc' = 'desc';
 
 	// User menu state
@@ -56,7 +56,9 @@
 		const query = searchQuery.toLowerCase();
 		return (
 			map.mapName.toLowerCase().includes(query) ||
-			map.ownerEmail.toLowerCase().includes(query)
+			map.ownerEmail.toLowerCase().includes(query) ||
+			(map.ownerName && map.ownerName.toLowerCase().includes(query)) ||
+			(map.ownerUsername && map.ownerUsername.toLowerCase().includes(query))
 		);
 	});
 
@@ -70,6 +72,12 @@
 				break;
 			case 'ownerEmail':
 				compareResult = a.ownerEmail.localeCompare(b.ownerEmail);
+				break;
+			case 'ownerUser':
+				// Sort by display name, fallback to username, then email
+				const aUser = a.ownerName || a.ownerUsername || a.ownerEmail;
+				const bUser = b.ownerName || b.ownerUsername || b.ownerEmail;
+				compareResult = aUser.localeCompare(bUser);
 				break;
 			case 'outputSizeBytes':
 				compareResult = (a.outputSizeBytes ?? 0) - (b.outputSizeBytes ?? 0);
@@ -207,6 +215,20 @@
 			return `${minutes}m ${remainingSeconds}s`;
 		}
 		return `${seconds}s`;
+	};
+
+	// Format user display based on available fields
+	const formatUserDisplay = (map: MapEntry): string => {
+		// Prioritize username over name
+		if (map.ownerUsername) {
+			// Remove @ and capitalize first letter
+			const username = map.ownerUsername;
+			return username.charAt(0).toUpperCase() + username.slice(1);
+		} else if (map.ownerName) {
+			return map.ownerName;
+		} else {
+			return map.ownerEmail; // Fallback for legacy data
+		}
 	};
 
 	// Calculate timing metrics for a map
@@ -655,12 +677,27 @@
 					<p class="meta">{allMaps.length} map{allMaps.length === 1 ? '' : 's'} in storage</p>
 				</div>
 				<div class="search-box">
-					<input
-						type="text"
-						placeholder="Search maps..."
-						bind:value={searchQuery}
-						class="search-input"
-					/>
+					<div class="search-input-wrapper">
+						<input
+							type="text"
+							placeholder="Search maps..."
+							bind:value={searchQuery}
+							class="search-input"
+						/>
+						{#if searchQuery}
+							<button
+								class="clear-search-button"
+								on:click={() => searchQuery = ''}
+								title="Clear search"
+								aria-label="Clear search"
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<line x1="18" y1="6" x2="6" y2="18"></line>
+									<line x1="6" y1="6" x2="18" y2="18"></line>
+								</svg>
+							</button>
+						{/if}
+					</div>
 					<button
 						class="button ghost refresh-button"
 						on:click={handleRefresh}
@@ -742,9 +779,17 @@
 										{/if}
 									</span>
 								</th>
+								<th class="sortable" on:click={() => handleSort('ownerUser')}>
+									<span class="th-content">
+										User
+										{#if sortColumn === 'ownerUser'}
+											<span class="sort-arrow">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+										{/if}
+									</span>
+								</th>
 								<th class="sortable" on:click={() => handleSort('ownerEmail')}>
 									<span class="th-content">
-										Owner
+										Email
 										{#if sortColumn === 'ownerEmail'}
 											<span class="sort-arrow">{sortDirection === 'asc' ? '↑' : '↓'}</span>
 										{/if}
@@ -794,6 +839,7 @@
 											</span>
 										</button>
 									</td>
+									<td>{formatUserDisplay(map)}</td>
 									<td>{map.ownerEmail}</td>
 									<td class="align-right">{formatBytes(map.outputSizeBytes)}</td>
 									<td class="align-right">{formatDate(map.createdAt)}</td>
@@ -864,7 +910,7 @@
 								{#if expandedMapId === map.mapId}
 									{@const metrics = getTimingMetrics(map)}
 									<tr class="timing-row">
-										<td colspan="8">
+										<td colspan="9">
 											<div class="timing-details">
 												<h4>Processing Timeline</h4>
 												{#if metrics.length > 0}
@@ -1425,9 +1471,18 @@
 		gap: 0.75rem;
 	}
 
+	.search-input-wrapper {
+		flex: 1;
+		position: relative;
+		display: flex;
+		align-items: center;
+	}
+
 	.search-input {
 		flex: 1;
+		width: 100%;
 		padding: 0.75rem 1rem;
+		padding-right: 2.5rem;
 		border-radius: 0.85rem;
 		border: 1px solid var(--input-border);
 		background: var(--input-background);
@@ -1444,6 +1499,36 @@
 		outline: none;
 		border-color: var(--input-focus);
 		box-shadow: 0 0 0 4px var(--accent-soft);
+	}
+
+	.clear-search-button {
+		position: absolute;
+		right: 0.5rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.75rem;
+		height: 1.75rem;
+		border-radius: 0.5rem;
+		border: none;
+		background: transparent;
+		color: var(--text-muted);
+		cursor: pointer;
+		transition: background 0.2s ease, color 0.2s ease;
+	}
+
+	.clear-search-button:hover {
+		background: var(--button-ghost-hover);
+		color: var(--text-primary);
+	}
+
+	.clear-search-button:active {
+		transform: scale(0.95);
+	}
+
+	.clear-search-button svg {
+		width: 16px;
+		height: 16px;
 	}
 
 	.table-wrapper {

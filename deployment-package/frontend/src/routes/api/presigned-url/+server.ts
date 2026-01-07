@@ -130,6 +130,8 @@ const reserveMapId = async (
 	mapId: string,
 	mapName: string,
 	submittedBy: string,
+	ownerName: string | undefined,
+	ownerUsername: string | undefined,
 	jobId: string
 ): Promise<{
 	reserved: boolean;
@@ -150,6 +152,8 @@ const reserveMapId = async (
 					status: 'RESERVED',
 					submittedBy: submittedBy,
 					ownerEmail: submittedBy,
+					ownerName: ownerName,
+					ownerUsername: ownerUsername,
 					userId: submittedBy,
 					jobId: jobId,
 					createdAt: new Date().toISOString(),
@@ -250,6 +254,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 		// Get user info for tracking
 		const submittedBy = locals.user?.email || locals.user?.username || locals.user?.name || 'system';
+		const ownerName = locals.user?.name;
+		const ownerUsername = locals.user?.username;
 
 		// Generate a unique job ID for this batch of files
 		const jobId = `JobId-${crypto.randomUUID()}`;
@@ -316,6 +322,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			const metadata = {
 				originalFilename: file.name,
 				submittedBy: submittedBy,
+				ownerName: ownerName || '',
+				ownerUsername: ownerUsername || '',
 				mapId: mapId,
 				jobId: jobId,
 				batchSize: batchSize
@@ -365,6 +373,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					vf.mapId,
 					vf.mapName,
 					submittedBy,
+					ownerName,
+					ownerUsername,
 					jobId
 				);
 

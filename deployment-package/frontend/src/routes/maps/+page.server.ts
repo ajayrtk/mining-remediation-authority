@@ -10,6 +10,8 @@ export type MapEntry = {
 	mapId: string;
 	mapName: string;
 	ownerEmail: string;
+	ownerName?: string;       // Display name from Cognito at upload time
+	ownerUsername?: string;   // Username from Cognito at upload time
 	createdAt: string;
 	processedAt?: string;
 	inputSizeBytes?: number;  // Input file size (uploaded ZIP)
@@ -68,6 +70,8 @@ const fetchMaps = async (limit: number = 50, lastKey?: any): Promise<{ maps: Map
 				mapId: String(item.mapId ?? ''),
 				mapName: String(item.mapName ?? ''),
 				ownerEmail: String(item.ownerEmail ?? ''),
+				ownerName: item.ownerName ? String(item.ownerName) : undefined,
+				ownerUsername: item.ownerUsername ? String(item.ownerUsername) : undefined,
 				createdAt: String(item.createdAt ?? ''),
 				processedAt: item.processedAt ? String(item.processedAt) : undefined,
 				inputSizeBytes,

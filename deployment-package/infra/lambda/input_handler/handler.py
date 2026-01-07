@@ -124,7 +124,7 @@ def get_s3_metadata(bucket: str, key: str) -> dict:
             raise  # Re-raise to let caller handle unexpected errors
 
 
-def create_map_entry(map_id: str, map_name: str, owner_email: str, size_bytes: int, timestamp: str, job_id: str) -> None:
+def create_map_entry(map_id: str, map_name: str, owner_email: str, owner_name: str | None, owner_username: str | None, size_bytes: int, timestamp: str, job_id: str) -> None:
     """Create a MAP entry in the MAPS table linked to a job."""
     if not MAPS_TABLE_NAME:
         logging.warning("MAPS_TABLE_NAME not configured, skipping MAP creation")
@@ -133,18 +133,26 @@ def create_map_entry(map_id: str, map_name: str, owner_email: str, size_bytes: i
     try:
         # Try to create a new map entry
         # The ConditionExpression prevents duplicates by checking if mapId/mapName combo exists
+        item = {
+            "mapId": {"S": map_id},  # Hash-based ID from file content
+            "mapName": {"S": map_name},  # Sanitized filename
+            "ownerEmail": {"S": owner_email},
+            "createdAt": {"S": timestamp},
+            "inputSizeBytes": {"N": str(size_bytes)},
+            "mapVersion": {"N": "1"},
+            "jobId": {"S": job_id},
+            "status": {"S": "QUEUED"}  # Start in QUEUED state
+        }
+
+        # Add owner name and username only if provided
+        if owner_name:
+            item["ownerName"] = {"S": owner_name}
+        if owner_username:
+            item["ownerUsername"] = {"S": owner_username}
+
         dynamo.put_item(
             TableName=MAPS_TABLE_NAME,
-            Item={
-                "mapId": {"S": map_id},  # Hash-based ID from file content
-                "mapName": {"S": map_name},  # Sanitized filename
-                "ownerEmail": {"S": owner_email},
-                "createdAt": {"S": timestamp},
-                "inputSizeBytes": {"N": str(size_bytes)},
-                "mapVersion": {"N": "1"},
-                "jobId": {"S": job_id},
-                "status": {"S": "QUEUED"}  # Start in QUEUED state
-            },
+            Item=item,
             ConditionExpression="attribute_not_exists(mapId) AND attribute_not_exists(mapName)"
         )
         logging.info(f"Created MAP entry: {map_id} / {map_name} linked to job {job_id} with status QUEUED")
@@ -409,6 +417,8 @@ def lambda_handler(event, _context):
                 continue
 
             submitted_by = metadata.get("submittedby", "system")
+            owner_name = metadata.get("ownername")  # Display name from Cognito
+            owner_username = metadata.get("ownerusername")  # Username from Cognito
             map_id = metadata.get("mapid", f"map_{uuid4().hex[:12]}")
             job_id = metadata.get("jobid", f"JobId-{str(uuid4())}")
 
@@ -428,19 +438,26 @@ def lambda_handler(event, _context):
             # Create MAP entry with FAILED status and validation error
             if MAPS_TABLE_NAME:
                 try:
+                    failed_item = {
+                        "mapId": {"S": map_id},
+                        "mapName": {"S": map_name},
+                        "ownerEmail": {"S": submitted_by},
+                        "createdAt": {"S": timestamp},
+                        "inputSizeBytes": {"N": str(size_bytes)},
+                        "mapVersion": {"N": "1"},
+                        "jobId": {"S": job_id},
+                        "status": {"S": "FAILED"},
+                        "errorMessage": {"S": f"Invalid filename format: {error_msg}"}
+                    }
+                    # Add owner name and username only if provided
+                    if owner_name:
+                        failed_item["ownerName"] = {"S": owner_name}
+                    if owner_username:
+                        failed_item["ownerUsername"] = {"S": owner_username}
+
                     dynamo.put_item(
                         TableName=MAPS_TABLE_NAME,
-                        Item={
-                            "mapId": {"S": map_id},
-                            "mapName": {"S": map_name},
-                            "ownerEmail": {"S": submitted_by},
-                            "createdAt": {"S": timestamp},
-                            "inputSizeBytes": {"N": str(size_bytes)},
-                            "mapVersion": {"N": "1"},
-                            "jobId": {"S": job_id},
-                            "status": {"S": "FAILED"},
-                            "errorMessage": {"S": f"Invalid filename format: {error_msg}"}
-                        }
+                        Item=failed_item
                     )
                     logging.info(f"Created FAILED MAP entry for invalid filename: {map_name}")
                 except ClientError:
@@ -477,6 +494,8 @@ def lambda_handler(event, _context):
             continue
 
         submitted_by = metadata.get("submittedby", "system")  # S3 lowercases metadata keys
+        owner_name = metadata.get("ownername")  # Display name from Cognito
+        owner_username = metadata.get("ownerusername")  # Username from Cognito
         map_id = metadata.get("mapid", f"map_{uuid4().hex[:12]}")  # Hash-based ID for deduplication
         job_id = metadata.get("jobid", f"JobId-{str(uuid4())}")  # Batch ID from frontend
 
@@ -507,7 +526,7 @@ def lambda_handler(event, _context):
         # Step 2: Create the MAP entry for this specific file
         # This also handles retry logic - if the map exists and failed before,
         # we update it to QUEUED and increment the retry counter
-        create_map_entry(map_id, map_name, submitted_by, size_bytes, timestamp, job_id)
+        create_map_entry(map_id, map_name, submitted_by, owner_name, owner_username, size_bytes, timestamp, job_id)
 
         # Step 3: Launch the processing task
         try:
