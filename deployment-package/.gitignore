@@ -1,8 +1,7 @@
 # Dependencies
 node_modules/
 
-# Documentation & Scripts (internal use only)
-docs/
+# Scripts (internal use only)
 scripts/
 
 # Build outputs
