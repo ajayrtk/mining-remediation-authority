@@ -14,6 +14,19 @@ echo -e "${BLUE}================================================${NC}"
 echo -e "${BLUE}   MRA Mines Map - Production Deployment${NC}"
 echo -e "${BLUE}================================================${NC}\n"
 
+# Load environment variables from .env
+if [ ! -f ".env" ]; then
+    echo -e "${RED}ERROR: .env file not found${NC}"
+    echo -e "${YELLOW}Please create .env from .env.example${NC}"
+    echo -e "${YELLOW}Run: cp .env.example .env${NC}"
+    exit 1
+fi
+
+# Export all variables from .env
+set -a
+source .env
+set +a
+
 # Step 0: Configure AWS credentials from .env
 echo -e "${BLUE}[0/8]${NC} ${YELLOW}Configuring AWS credentials...${NC}"
 if ! ./scripts/configure_aws.sh; then
@@ -45,7 +58,7 @@ echo -e "  Environment: ${BLUE}${ENVIRONMENT}${NC}"
 echo -e "  Deployed by: ${BLUE}${AWS_USER}${NC}"
 echo ""
 
-# Validate processor repository path (already loaded by configure_aws.sh)
+# Validate processor repository path (loaded from .env above)
 if [ -z "$PROCESSOR_REPO_PATH" ]; then
     echo -e "${RED}ERROR: PROCESSOR_REPO_PATH not set in .env${NC}"
     echo -e "${YELLOW}Please edit .env and set:${NC}"

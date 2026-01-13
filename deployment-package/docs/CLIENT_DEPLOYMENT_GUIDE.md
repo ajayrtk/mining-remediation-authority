@@ -780,8 +780,8 @@ Follow prompts and type `DELETE` then `YES I AM SURE`
 
 ### Additional Documentation
 
-- **Architecture Details**: `docs/architecture.md`
-- **Detailed Troubleshooting**: `docs/troubleshooting.md`
+- **Architecture Details**: `architecture.md`
+- **Detailed Troubleshooting**: `troubleshooting.md`
 - **Quick Start Guide**: `DEPLOYMENT_QUICKSTART.md`
 
 ### Getting Help

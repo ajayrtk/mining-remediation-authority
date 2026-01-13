@@ -45,3 +45,9 @@ Thumbs.db
 
 # AWS CLI Cache
 .aws/
+
+# Personal Notes & Action Items
+**/Action items
+action-items.txt
+notes.txt
+TODO.txt

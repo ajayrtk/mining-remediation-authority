@@ -1,383 +1,473 @@
-# MRA Mines Map - Deployment Package
+# MRA Mines Map Application - Deployment Package
 
-## Overview
+## 🎯 Quick Start
 
-This package contains everything needed to deploy the MRA Mines Map application to your AWS account. The system is a cloud-native web application for processing and managing mining map data, built with serverless and container-based AWS services.
+**New to this application?** Start here:
 
-### Key Features
-- **Secure Authentication**: AWS Cognito with OAuth 2.0
-- **Scalable Processing**: ECS Fargate for on-demand computing
-- **HTTPS Access**: Application Load Balancer with SSL/TLS
-- **Serverless Processing**: Lambda functions for automated workflows
-- **Managed Storage**: S3 for files, DynamoDB for metadata
-
-### Estimated Monthly Cost
-**$32-62/month** for moderate usage (low traffic, ~10-50 users)
+1. **Read**: `docs/CLIENT_DEPLOYMENT_GUIDE.md` - Complete step-by-step instructions
+2. **Configure**: Create `.env` and `terraform.tfvars` files
+3. **Deploy**: Run `./scripts/deploy.sh`
+4. **Time Required**: 30-45 minutes
 
 ---
 
-## Quick Start
+## 📚 Documentation Overview
 
-### Prerequisites
-- AWS account with admin access
-- AWS CLI v2.0+ installed and configured
-- Terraform v1.6.0+ installed
-- Docker v20.0+ installed and running
-- Node.js v20.0+ and npm v9.0+ installed
+This package contains everything needed to deploy the MRA Mines Map application to AWS.
 
-### Deployment in 3 Steps
+### Start Here (Pick One)
 
-**1. Run pre-flight checks:**
-```bash
-cd deployment-package
-./scripts/setup.sh
-```
+| Document | Best For | Time to Read |
+|----------|----------|--------------|
+| **docs/CLIENT_DEPLOYMENT_GUIDE.md** | First-time deployment, step-by-step instructions | 10 min |
+| **docs/DEPLOYMENT_QUICKSTART.md** | Quick reference, experienced users | 3 min |
+| **This README** | Overview and document navigation | 2 min |
 
-**2. Configure settings:**
-```bash
-# Edit terraform.tfvars
-cd infra
-nano terraform.tfvars
+### Detailed Documentation
 
-# Minimum required changes:
-# - aws_region = "eu-west-2"
-# - use_existing_iam_roles = true (if IAM roles already exist)
-```
-
-**3. Deploy:**
-```bash
-./scripts/deploy.sh
-```
-
-**Total deployment time:** 10-15 minutes
+| Document | Purpose |
+|----------|---------|
+| `docs/architecture.md` | System architecture and design |
+| `docs/deployment-guide.md` | Alternative deployment guide |
+| `docs/troubleshooting.md` | Common issues and solutions |
+| `docs/PACKAGE_CONTENTS.md` | Complete package inventory |
 
 ---
 
-## What's Included
+## 📦 What's Included
+
+### Core Components
 
 ```
 deployment-package/
-├── infra/                          # Terraform infrastructure code
-│   ├── *.tf                        # Resource definitions
-│   ├── lambda/                     # Lambda function source code
-│   │   ├── input_handler/          # S3 upload processor
-│   │   ├── output_handler/         # Results processor
-│   │   ├── s3_copy_processor/      # File copy utility
-│   │   ├── ecs_state_handler/      # ECS event handler
-│   │   └── pre_auth_trigger/       # Cognito pre-auth Lambda
-│   └── terraform.tfvars.example    # Configuration template
-│
-├── frontend/                       # SvelteKit web application
-│   ├── src/                        # Application source code
-│   ├── Dockerfile                  # Container definition
-│   └── build_and_push.sh           # Frontend container build script
+├── README.md                           ← You are here
+├── .env.example                        ← Template for configuration
+├── .gitignore                          ← Security (keeps .env safe)
 │
 ├── scripts/
-│   ├── setup.sh                    # Prerequisites checker
-│   ├── deploy.sh                   # Automated deployment
-│   └── cleanup.sh                  # Resource cleanup/destroy
+│   ├── setup.sh                       ← Check prerequisites
+│   ├── configure_aws.sh               ← Validate AWS credentials
+│   ├── deploy.sh                      ← MAIN DEPLOYMENT SCRIPT
+│   └── cleanup.sh                     ← Remove all resources
 │
-├── docs/
-│   ├── architecture.md             # System architecture
-│   ├── deployment-guide.md         # Detailed deployment steps
-│   └── troubleshooting.md          # Common issues and solutions
+├── infra/
+│   ├── *.tf                           ← Terraform infrastructure code
+│   ├── terraform.tfvars.example       ← Infrastructure config template
+│   └── lambda/                        ← AWS Lambda functions
 │
-└── README.md                       # This file
+├── frontend/
+│   ├── src/                           ← Web application source
+│   ├── Dockerfile                     ← Frontend container
+│   └── build_and_push.sh              ← Frontend deployment
+│
+└── docs/
+    ├── CLIENT_DEPLOYMENT_GUIDE.md     ← START HERE for deployment
+    ├── DEPLOYMENT_QUICKSTART.md       ← Quick reference
+    ├── PACKAGE_CONTENTS.md            ← Complete inventory
+    ├── architecture.md                ← System design
+    ├── deployment-guide.md            ← Alternative guide
+    └── troubleshooting.md             ← Problem solving
 ```
+
+### Additional Repository Required
+
+**mra-mine-plans-ds/** - Map processor engine (ML/CV)
+- Must be extracted alongside deployment-package
+- Contains Python processing code
+- Built and deployed automatically by `deploy.sh`
 
 ---
 
-## Architecture Overview
+## 🚀 Quick Deployment Steps
 
-```
-User → ALB (HTTPS) → ECS Fargate (Frontend)
-                           ↓
-                       Cognito (Auth)
-                           ↓
-               S3 ← → Lambda ← → DynamoDB
-                           ↓
-                   ECS Fargate (Processor)
-```
+### 1. Prerequisites
 
-**Key Components:**
-- **ALB**: Application Load Balancer with HTTPS (self-signed cert)
-- **ECS Fargate**: Containerized frontend (SvelteKit) and processor
-- **Cognito**: User authentication
-- **S3**: File storage (input/output buckets)
-- **Lambda**: Serverless processing triggers
-- **DynamoDB**: Job tracking and metadata
-- **VPC**: Network isolation
-
-See [docs/architecture.md](docs/architecture.md) for detailed architecture documentation.
-
----
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [Architecture](docs/architecture.md) | System design, components, data flow |
-| [Deployment Guide](docs/deployment-guide.md) | Step-by-step deployment instructions |
-| [Troubleshooting](docs/troubleshooting.md) | Common issues and solutions |
-
----
-
-## Configuration Options
-
-The `infra/terraform.tfvars` file controls all deployment settings. Key options:
-
-### Required Settings
-```hcl
-aws_region = "eu-west-2"              # AWS region
-
-# IAM roles configuration
-use_existing_iam_roles = true         # Use existing IAM roles (recommended)
-```
-
-### IAM Roles (if using existing)
-```hcl
-existing_iam_role_names = {
-  input_handler           = "mra-mines-input-handler"
-  mock_ecs               = "mra-mines-mock-ecs"
-  output_handler         = "mra-mines-output-handler"
-  s3_copy_processor      = "mra-mines-s3-copy-processor"
-  ecs_task_execution     = "mra-mines-ecs-task-execution"
-  ecs_task               = "mra-mines-ecs-task"
-  frontend_task_execution = "mra-mines-dev-frontend-task-execution"
-  frontend_task          = "mra-mines-dev-frontend-task"
-  pre_auth_trigger       = "mra-mines-pre-auth-trigger-role"
-}
-```
-
-### Custom Domain (Optional)
-```hcl
-enable_custom_domain = true
-domain_name = "mine-maps.com"
-```
-
-This enables ACM SSL certificate and Route53 DNS. See [Deployment Guide](docs/deployment-guide.md#custom-domain-setup-optional) for setup instructions.
-
-See [infra/terraform.tfvars.example](infra/terraform.tfvars.example) for all available options.
-
----
-
-## Post-Deployment
-
-After deployment completes, you'll receive:
-- **Application URL**: ALB endpoint with HTTPS (self-signed certificate)
-- **Cognito User Pool ID**: For creating users
-- **S3 Bucket Names**: For file storage
-
-> **Note**: Browser will show a certificate warning (self-signed cert). Click "Advanced" → "Proceed" to access the application.
-
-### Create Your First User
-
+Install required tools (run checker):
 ```bash
-# Get Cognito User Pool ID
-cd infra
-POOL_ID=$(terraform output -raw cognito_user_pool_id)
-
-# Create admin user
-aws cognito-idp admin-create-user \
-  --user-pool-id $POOL_ID \
-  --username admin@your-domain.com \
-  --user-attributes Name=email,Value=admin@your-domain.com
-
-# Set password
-aws cognito-idp admin-set-user-password \
-  --user-pool-id $POOL_ID \
-  --username admin@your-domain.com \
-  --password 'YourSecurePassword123!' \
-  --permanent
+./scripts/setup.sh
 ```
 
-### Access Your Application
+**Required**:
+- AWS CLI v2.0+
+- Terraform v1.6.0+
+- Docker v20.0+
+- Node.js v20.0+ & npm v9.0+
 
-Visit the Application URL and log in with your admin credentials.
+### 2. Get AWS Credentials
 
----
+Create IAM user in AWS Console:
+- Go to: https://console.aws.amazon.com/iam/
+- Create user with **AdministratorAccess**
+- Create **Access Keys** (save immediately!)
 
-## Common Tasks
+### 3. Configure Environment
 
-### View Application Logs
+**Create `.env` file**:
+```bash
+cp .env.example .env
+nano .env
+```
+
+**Add your credentials**:
+```bash
+AWS_ACCESS_KEY_ID=your-key-here
+AWS_SECRET_ACCESS_KEY=your-secret-here
+AWS_DEFAULT_REGION=eu-west-2
+PROCESSOR_REPO_PATH=/path/to/mra-mine-plans-ds
+```
+
+**Create `terraform.tfvars`**:
 ```bash
 cd infra
-aws logs tail /ecs/mra-mines-dev-frontend --follow
+cp terraform.tfvars.example terraform.tfvars
+nano terraform.tfvars
 ```
 
-### Update Frontend Code
+### 4. Deploy
+
 ```bash
-cd frontend
-# Make changes, then:
-npm run build
-cd ../infra
-./build_and_push.sh
-aws ecs update-service --cluster mra-mines-cluster --service mra-mines-dev-frontend --force-new-deployment
+cd ..  # Back to deployment-package
+./scripts/deploy.sh
 ```
 
-### Scale Resources
-```bash
-# Edit terraform.tfvars (change CPU/memory)
-cd infra
-terraform apply
-```
+**Duration**: 15-25 minutes
 
-### Destroy Everything
-```bash
-cd deployment-package
-./scripts/cleanup.sh
-# Follow prompts (requires "DELETE" and "YES I AM SURE")
-```
+### 5. Access
 
+Visit the Application URL shown at the end of deployment.
 
 ---
 
-## Troubleshooting
+## 🎓 Deployment Workflow Diagram
 
-### Certificate warning in browser
-**Expected behavior:** The ALB uses a self-signed certificate. Click "Advanced" → "Proceed" to continue.
+```
+┌─────────────────────────────────────────────────────────┐
+│                    DEPLOYMENT FLOW                       │
+└─────────────────────────────────────────────────────────┘
 
-### Login fails with "redirect_mismatch"
-**Solution:** Verify ALB URL is correctly configured in Cognito:
-```bash
-cd infra
-terraform output alb_url
+1. Prerequisites Check (./scripts/setup.sh)
+   ├─ AWS CLI ✓
+   ├─ Terraform ✓
+   ├─ Docker ✓
+   └─ Node.js ✓
+
+2. Configuration
+   ├─ Create .env (AWS credentials + paths)
+   └─ Create terraform.tfvars (infrastructure settings)
+
+3. Run Deployment (./scripts/deploy.sh)
+   ├─ [0/8] Configure AWS credentials
+   ├─ [1/8] Initialize Terraform
+   ├─ [2/8] Plan infrastructure
+   ├─ [3/8] Deploy infrastructure (~5-10 min)
+   │   ├─ VPC, Subnets, Security Groups
+   │   ├─ ALB, ECS Cluster
+   │   ├─ S3 Buckets, DynamoDB Tables
+   │   ├─ Lambda Functions
+   │   ├─ Cognito User Pool
+   │   └─ ECR Repositories
+   ├─ [4/8] Build processor container (~5-10 min)
+   │   └─ Docker build + push to ECR
+   ├─ [5/8] Build frontend container (~3-5 min)
+   │   └─ Docker build + push to ECR
+   ├─ [6/8] Wait for ECS deployment (~2-3 min)
+   ├─ [7/8] Verify Cognito configuration
+   └─ [8/8] Create admin user
+
+4. Post-Deployment
+   ├─ Login to application
+   ├─ Change admin password
+   └─ Configure custom domain (optional)
+
+5. Testing
+   ├─ Upload test map
+   ├─ Verify processing
+   └─ Check logs
 ```
 
-### "AccessDenied" errors in application
-**Solution:** Check IAM roles have correct permissions:
-```bash
-aws ecs describe-task-definition \
-  --task-definition mra-mines-dev-frontend \
-  --query 'taskDefinition.taskRoleArn'
-```
+---
 
-See [docs/troubleshooting.md](docs/troubleshooting.md) for more solutions.
+## 🎯 Key Features
 
+This deployment creates a **production-ready** cloud application with:
+
+✅ **Serverless Architecture**
+- AWS ECS Fargate (containers)
+- AWS Lambda (event processing)
+- DynamoDB (NoSQL database)
+- S3 (file storage)
+
+✅ **Secure by Default**
+- HTTPS/TLS encryption
+- OAuth 2.0 authentication (Cognito)
+- IAM role-based permissions
+- VPC network isolation
+
+✅ **Scalable**
+- Auto-scaling containers
+- On-demand processing
+- Distributed architecture
+
+✅ **Cost-Optimized**
+- Pay-per-use pricing
+- Fargate Spot for batch jobs
+- Estimated: $50-100/month
 
 ---
 
-## Security Best Practices
+## 🔒 Security Best Practices
 
-✅ **Before deploying to production:**
+### Before Deployment
 
-1. **Use a dedicated AWS account** for production workloads
-2. **Enable MFA** on all IAM users
-3. **Enable CloudTrail** for audit logging
-4. **Set up AWS Budgets** to monitor costs
-5. **Review IAM policies** for least-privilege access
-6. **Verify SES email** for production notifications
-7. **Configure custom domain** with SSL/TLS certificate
-8. **Enable DynamoDB backups** (PITR) for production data
+1. ✅ **Use dedicated AWS account** for production
+2. ✅ **Enable MFA** on AWS root account
+3. ✅ **Review IAM permissions** (least privilege)
 
+### During Configuration
 
----
+1. ✅ **Strong passwords** (admin user)
+2. ✅ **Secure .env file** (never commit to git)
+3. ✅ **Valid email** for admin user
 
-## Cost Breakdown
+### After Deployment
 
-### Default Configuration (~$32-62/month)
-| Service | Monthly Cost | Notes |
-|---------|-------------|-------|
-| ECS Fargate (Frontend) | $15-25 | 24/7 running task |
-| ALB | $16-22 | Load balancer + LCU |
-| DynamoDB | $2-10 | On-demand pricing |
-| S3 Storage | $1-5 | Depends on uploads |
-| Lambda | $0-5 | Usually in free tier |
-| ECR | $1 | Image storage |
-
-### Cost Optimization
-- Set S3 lifecycle policies (delete old files)
-- Right-size ECS tasks (don't over-provision)
-- Use DynamoDB on-demand for variable load
-
+1. ✅ **Change default admin password immediately**
+2. ✅ **Enable CloudTrail** (audit logging)
+3. ✅ **Set up AWS Budgets** (cost monitoring)
+4. ✅ **Configure backups** (DynamoDB PITR)
+5. ✅ **Review security groups** (network access)
 
 ---
 
-## Support
+## 💰 Cost Estimation
 
-### AWS Resources
-- **AWS CLI Reference**: https://docs.aws.amazon.com/cli/
-- **Terraform Registry**: https://registry.terraform.io/providers/hashicorp/aws/
-- **SvelteKit Docs**: https://kit.svelte.dev/
+**Production Environment** (moderate usage):
 
-### Common Commands Reference
+| Service | Monthly Cost |
+|---------|--------------|
+| ECS Fargate (Frontend) | $20-35 |
+| ALB | $16-22 |
+| DynamoDB | $5-15 |
+| S3 Storage | $2-10 |
+| Lambda | $0-5 |
+| ECR | $1-2 |
+| Route53 | $0.50 |
+| **Total** | **$50-100** |
 
-**Check deployment status:**
+**Cost varies based on**:
+- Number of maps processed
+- Storage usage
+- Number of users
+- Data transfer
+
+---
+
+## 🛠️ Useful Commands
+
+### Check Deployment Status
+
 ```bash
 cd infra
 terraform output
 ```
 
-**View logs:**
+### View Application Logs
+
 ```bash
-aws logs tail /ecs/mra-mines-dev-frontend --follow
+# Frontend
+aws logs tail /ecs/mra-mines-frontend-prod --follow
+
+# Processor
+aws logs tail /ecs/mra-mines-processor-prod --follow
 ```
 
-**List users:**
+### Create New User
+
 ```bash
-POOL_ID=$(cd infra && terraform output -raw cognito_user_pool_id)
-aws cognito-idp list-users --user-pool-id $POOL_ID
+cd infra
+POOL_ID=$(terraform output -raw cognito_user_pool_id)
+
+aws cognito-idp admin-create-user \
+  --user-pool-id $POOL_ID \
+  --username newuser@company.com \
+  --user-attributes Name=email,Value=newuser@company.com
+
+aws cognito-idp admin-set-user-password \
+  --user-pool-id $POOL_ID \
+  --username newuser@company.com \
+  --password 'SecurePassword123!' \
+  --permanent
 ```
 
-**Check service health:**
+### Check Infrastructure Health
+
 ```bash
+cd infra
+
+# ECS Service
 aws ecs describe-services \
-  --cluster mra-mines-cluster \
-  --services mra-mines-dev-frontend \
-  --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount}'
+  --cluster $(terraform output -raw ecs_cluster_name) \
+  --services $(terraform output -raw frontend_service_name) \
+  --query 'services[0].{Status:status,Running:runningCount}'
+
+# ALB Health
+aws elbv2 describe-target-health \
+  --target-group-arn $(terraform output -raw frontend_target_group_arn)
+```
+
+### Destroy Everything
+
+```bash
+./scripts/cleanup.sh
 ```
 
 ---
 
-## License
+## 📞 Getting Help
 
-Copyright © 2025 MRA Mines Project. All rights reserved.
+### Self-Service Resources
 
-This deployment package is provided for authorized use only. Unauthorized copying, distribution, or use is prohibited.
+1. **Troubleshooting Guide**: `docs/troubleshooting.md`
+2. **Architecture Docs**: `docs/architecture.md`
+3. **AWS Service Health**: https://status.aws.amazon.com/
 
----
+### Common Issues
 
-## Changelog
+| Issue | Solution |
+|-------|----------|
+| AWS credentials invalid | Check `.env` file, verify in IAM console |
+| Docker not running | Start Docker Desktop or service |
+| Processor path not found | Set absolute path in `.env` |
+| terraform.tfvars missing | Copy from terraform.tfvars.example |
+| ECS task not starting | Check CloudWatch logs, verify ECR image |
 
-### Version 1.0.0 (2025-11-06)
-- Initial release
-- Complete infrastructure as code (Terraform)
-- Automated deployment scripts
-- Comprehensive documentation
-- Production-ready configuration
+### Diagnostic Scripts
 
----
+```bash
+# Check prerequisites
+./scripts/setup.sh
 
-## Technical Specifications
+# Test AWS credentials
+./scripts/configure_aws.sh
 
-| Component | Technology | Version |
-|-----------|-----------|---------|
-| Frontend | SvelteKit | Latest |
-| Backend | Node.js | 20.x |
-| Infrastructure | Terraform | 1.6.0+ |
-| Container Runtime | Docker | 20.0+ |
-| Cloud Provider | AWS | N/A |
-| Authentication | Cognito | OAuth 2.0 |
-| Database | DynamoDB | On-demand |
-| Storage | S3 | Standard |
-| Load Balancer | ALB | Latest |
-| Compute | ECS Fargate | Latest |
+# View all Terraform outputs
+cd infra && terraform output
+```
 
 ---
 
-## Getting Help
+## 🔄 Maintenance
 
-If you encounter issues:
+### Regular Tasks
 
-1. **Check the logs** first (see Common Commands above)
-2. **Review troubleshooting sections** in relevant documentation
-3. **Verify AWS credentials** and permissions
-4. **Check AWS Service Health** dashboard
-5. **Review recent changes** (git log, Terraform state)
+**Weekly**:
+- Review CloudWatch logs for errors
+- Check AWS costs in Billing Dashboard
 
+**Monthly**:
+- Update admin user password
+- Review IAM permissions
+- Check S3 storage usage
+
+**Quarterly**:
+- Update Docker images
+- Review and update documentation
+- Test disaster recovery
+
+### Updating the Application
+
+**Frontend updates**:
+```bash
+cd frontend
+# Make changes...
+npm run build
+./build_and_push.sh
+```
+
+**Infrastructure updates**:
+```bash
+cd infra
+# Edit .tf files...
+terraform plan
+terraform apply
+```
 
 ---
 
-**Package Version:** 1.0.1
-**Last Updated:** 2025-11-26
-**Tested With:** AWS CLI 2.x, Terraform 1.6.x, Node.js 20.x
+## 📝 Important Files
+
+### Must Configure (Before Deployment)
+
+| File | Purpose | Create From |
+|------|---------|-------------|
+| `.env` | AWS credentials & paths | `.env.example` |
+| `infra/terraform.tfvars` | Infrastructure settings | `terraform.tfvars.example` |
+
+### Generated (During Deployment)
+
+| File | Purpose | Location |
+|------|---------|----------|
+| `terraform.tfstate` | Infrastructure state | `infra/` |
+| `.terraform/` | Provider plugins | `infra/` |
+
+### Never Commit (Protected by .gitignore)
+
+- `.env` - Contains AWS credentials
+- `terraform.tfstate` - May contain sensitive data
+- `infra/.terraform/` - Provider binaries
+
+---
+
+## 🎉 Next Steps
+
+After successful deployment:
+
+1. **Immediate** (First Hour):
+   - ✅ Change admin password
+   - ✅ Test map upload and processing
+   - ✅ Verify ECS tasks are healthy
+
+2. **Short Term** (First Day):
+   - ✅ Create additional user accounts
+   - ✅ Set up monitoring alerts
+   - ✅ Configure cost budgets
+
+3. **Medium Term** (First Week):
+   - ✅ Enable DynamoDB backups
+   - ✅ Configure CloudTrail
+   - ✅ Train team on application
+
+4. **Long Term** (Ongoing):
+   - ✅ Monitor costs and optimize
+   - ✅ Regular security audits
+   - ✅ Performance tuning
+
+---
+
+## 📄 License & Support
+
+**Copyright © 2025 MRA Mines Project**
+
+This deployment package is provided for authorized use only.
+
+**Package Version**: 2.0.0
+**Last Updated**: January 2025
+**Tested With**: AWS CLI 2.x, Terraform 1.6.x, Node.js 20.x
+
+---
+
+## 🚀 Ready to Deploy?
+
+**Follow these steps**:
+
+1. ✅ Read `docs/CLIENT_DEPLOYMENT_GUIDE.md`
+2. ✅ Run `./scripts/setup.sh`
+3. ✅ Configure `.env` and `terraform.tfvars`
+4. ✅ Run `./scripts/deploy.sh`
+5. ✅ Access your application!
+
+**Questions?** Check the troubleshooting guide or review the documentation.
+
+---
+
+**Happy Deploying! 🎉**

@@ -3,78 +3,187 @@
 ## Prerequisites
 
 - AWS account with admin access
-- AWS CLI v2.0+ configured
+- AWS CLI v2.0+ (no need to configure separately)
 - Terraform v1.6.0+
 - Docker v20.0+ running
 - Node.js v20.0+ and npm v9.0+
+- Both repositories extracted: `deployment-package/` and `mra-mine-plans-ds/`
 
-## Step 1: Configure Settings
+**Quick Check**:
+```bash
+cd deployment-package
+./scripts/setup.sh
+```
+
+## Step 1: Configure Environment (.env)
+
+The `.env` file contains AWS credentials and paths. This approach makes deployment portable across different machines.
+
+### Create .env file:
 
 ```bash
-cd deployment-package/infra
+cd deployment-package
+cp .env.example .env
+nano .env  # or use your preferred editor
+```
+
+### Configure Required Settings:
+
+```bash
+# ==================================================
+# AWS CREDENTIALS (REQUIRED)
+# ==================================================
+AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+AWS_DEFAULT_REGION=eu-west-2
+
+# ==================================================
+# PROCESSOR REPOSITORY (REQUIRED)
+# ==================================================
+# Set the absolute path to mra-mine-plans-ds repository
+PROCESSOR_REPO_PATH=/home/username/mra-mine-plans-ds
+
+# ==================================================
+# OPTIONAL: PROJECT CONFIGURATION
+# ==================================================
+# PROJECT_NAME=mra-mines
+# ENVIRONMENT=prod
+```
+
+**Important**:
+- Get AWS credentials from IAM Console → Users → Security Credentials → Create Access Key
+- Use absolute path for PROCESSOR_REPO_PATH (not relative)
+- Never commit `.env` to version control (already in .gitignore)
+
+### Validate Configuration:
+
+```bash
+./scripts/configure_aws.sh
+```
+
+**Expected Output**:
+```
+✓ AWS credentials validated successfully
+  Account ID: 123456789012
+  Region:     eu-west-2
+✓ S3 access confirmed
+```
+
+## Step 2: Configure Infrastructure (terraform.tfvars)
+
+```bash
+cd infra
 cp terraform.tfvars.example terraform.tfvars
+nano terraform.tfvars
 ```
 
 Edit `terraform.tfvars`:
 
 ```hcl
-aws_region    = "eu-west-2"
+aws_region    = "eu-west-2"  # Same as in .env
 project_name  = "mra-mines"
-environment   = "staging"
+environment   = "prod"        # prod, staging, or dev
 
 # Admin credentials
 admin_username = "admin"
-admin_email    = "admin@example.com"
-admin_password = "ChangeMe123!"
+admin_email    = "admin@yourcompany.com"
+admin_password = "ChangeThisPassword123!"
 
-# Use existing IAM roles (recommended)
-use_existing_iam_roles = true
+# IAM Configuration
+use_existing_iam_roles = false  # Set true if roles exist
+
+# Custom Domain (Optional)
+enable_custom_domain = true
+domain_name          = "mine-maps.yourcompany.com"
 ```
 
-## Step 2: Deploy
+## Step 3: Deploy Everything
 
-Run the automated deployment:
+Run the automated deployment script:
 
 ```bash
-cd deployment-package
+cd ..  # Back to deployment-package
 ./scripts/deploy.sh
 ```
 
-This will:
-1. Initialize Terraform
-2. Create infrastructure (~5-10 minutes)
-3. Build and push frontend container
-4. Wait for ECS deployment
-5. Create admin user
-6. Verify deployment
+**This single command will**:
+1. **[0/8]** Configure AWS credentials from .env
+2. **[1/8]** Initialize Terraform
+3. **[2/8]** Plan infrastructure
+4. **[3/8]** Create AWS infrastructure (~5-10 minutes)
+5. **[4/8]** Build and push processor container (~5-10 minutes)
+   - Navigates to mra-mine-plans-ds
+   - Builds Docker image
+   - Pushes to ECR
+6. **[5/8]** Build and push frontend container (~3-5 minutes)
+7. **[6/8]** Wait for ECS deployment
+8. **[7/8]** Verify Cognito configuration
+9. **[8/8]** Create admin user
 
-## Step 3: Access Application
+**Total Time**: 15-25 minutes
+
+**Deployment Output**:
+```
+============================================
+Deployment completed successfully!
+
+Application URL: https://alb-123456789.eu-west-2.elb.amazonaws.com
+
+Admin Credentials:
+  Username: admin
+  Email:    admin@yourcompany.com
+  Password: ChangeThisPassword123!
+
+⚠ CHANGE THIS PASSWORD after first login!
+============================================
+```
+
+## Step 4: Access Application
 
 After deployment:
 
-1. Visit the Application URL (shown in output)
+1. Visit the Application URL (shown in deployment output)
 2. Accept certificate warning (self-signed HTTPS)
+   - Chrome: Click "Advanced" → "Proceed to site"
+   - Firefox: Click "Advanced" → "Accept the Risk"
 3. Login with admin credentials
-4. Change password immediately
+4. **Change password immediately** (security requirement)
 
-## Manual Deployment
+## Alternative: Manual Deployment
 
-If you prefer manual steps:
+If you prefer manual control over each step:
 
+### 1. Configure AWS Credentials
 ```bash
-# 1. Deploy infrastructure
+cd deployment-package
+./scripts/configure_aws.sh
+```
+
+### 2. Deploy Infrastructure
+```bash
 cd infra
 terraform init
 terraform plan
 terraform apply
+```
 
-# 2. Build and deploy frontend
-cd ../frontend
+### 3. Build and Deploy Processor
+```bash
+# Navigate to processor repository (path from .env)
+cd $PROCESSOR_REPO_PATH
+./build_and_push.sh
+```
+
+### 4. Build and Deploy Frontend
+```bash
+cd /path/to/deployment-package/frontend
 npm ci
 npm run build
 ./build_and_push.sh
+```
 
-# 3. Get outputs
+### 5. Get Deployment Information
+```bash
 cd ../infra
 terraform output
 ```
